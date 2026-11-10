@@ -1,7 +1,8 @@
 """Backend Helix Stadium: ricetta -> file .hsp pronto da importare.
 
-Usa helixgen (progetto open source non ufficiale) tramite la sua CLI, che e'
-l'interfaccia stabile della libreria.
+Usa helixgen (progetto open source non ufficiale) tramite i comandi della sua
+CLI, che sono l'interfaccia stabile della libreria. I comandi girano dentro
+questo stesso processo: cosi' funziona anche nell'eseguibile per Windows.
 
 Prerequisito una tantum: helixgen deve conoscere il tuo Stadium. Esporta dalla
 app Helix Stadium almeno un preset .hsp (meglio un'intera setlist) e importalo
@@ -12,10 +13,8 @@ from __future__ import annotations
 
 import json
 import re
-import shutil
-import subprocess
-import sys
 import tempfile
+import threading
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -40,9 +39,11 @@ class HelixBuild:
     resolved: dict[str, str] = field(default_factory=dict)  # block_id -> model_id
 
 
-def _helixgen_cmd() -> list[str]:
-    exe = shutil.which("helixgen")
-    return [exe] if exe else [sys.executable, "-m", "helixgen.cli"]
+@dataclass
+class _Result:
+    returncode: int
+    stdout: str
+    stderr: str
 
 
 def _choose_model(b: Block, cat: HelixCatalog, warnings: list[str]) -> HelixModel:
@@ -172,8 +173,24 @@ def build_spec(recipe: ToneRecipe, cat: HelixCatalog | None = None) -> HelixBuil
     return HelixBuild(spec, warnings, {bid: m.model_id for bid, m in models.items()})
 
 
-def _run(args: list[str]) -> subprocess.CompletedProcess:
-    return subprocess.run(_helixgen_cmd() + args, capture_output=True, text=True, encoding="utf-8")
+_RUN_LOCK = threading.Lock()  # CliRunner sostituisce stdout/stderr del processo: un comando alla volta
+
+
+def _run(args: list[str]) -> _Result:
+    """Esegue un comando helixgen nel processo corrente, catturandone l'output."""
+    from click.testing import CliRunner
+    from helixgen.cli import cli
+
+    with _RUN_LOCK:
+        res = CliRunner().invoke(cli, args, catch_exceptions=True)
+    out = res.stdout if hasattr(res, "stdout") else res.output
+    try:
+        err = res.stderr or ""
+    except ValueError:  # vecchie versioni di click: stderr mescolato a stdout
+        err = ""
+    if res.exception and not isinstance(res.exception, SystemExit):
+        err = (err + "\n" + f"{type(res.exception).__name__}: {res.exception}").strip()
+    return _Result(res.exit_code, out or "", err or (out if res.exit_code else ""))
 
 
 def library_status() -> dict[str, Any]:
@@ -215,7 +232,7 @@ def generate_hsp(recipe: ToneRecipe, out_dir: str | Path) -> tuple[Path, HelixBu
         out = out_dir / f"{safe}_{n}.hsp"
         n += 1
 
-    def attempt(spec: dict) -> subprocess.CompletedProcess:
+    def attempt(spec: dict) -> _Result:
         with tempfile.TemporaryDirectory() as td:
             rp = Path(td) / "recipe.json"
             rp.write_text(json.dumps(spec, ensure_ascii=False), encoding="utf-8")

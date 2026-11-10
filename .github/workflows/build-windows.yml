@@ -1,0 +1,89 @@
+# Costruisce ToneBuilder.exe per Windows a ogni push su main e lo pubblica
+# nella release "latest" del repository (Releases > Tone Builder).
+name: Eseguibile Windows
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Dipendenze
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install ".[all,dev]" pyinstaller yt-dlp
+
+      - name: Test
+        run: python -m pytest -q
+
+      - name: Libreria USB per il Quad Cortex (hidapi)
+        shell: pwsh
+        run: |
+          Invoke-WebRequest https://github.com/libusb/hidapi/releases/download/hidapi-0.14.0/hidapi-win.zip -OutFile hidapi.zip
+          Expand-Archive hidapi.zip -DestinationPath hidapi
+          Copy-Item hidapi/x64/hidapi.dll .
+
+      - name: Build
+        run: >
+          pyinstaller --noconfirm --onefile --name ToneBuilder
+          --add-binary "hidapi.dll;."
+          --collect-all helixgen --collect-all pyquadcortex
+          --collect-data tonebuilder --collect-submodules tonebuilder
+          --collect-submodules uvicorn --hidden-import yt_dlp
+          --exclude-module demucs --exclude-module torch
+          --exclude-module librosa --exclude-module numba
+          packaging/launcher.py
+
+      - name: Prova di avvio
+        shell: pwsh
+        run: |
+          $env:TONEBUILDER_HOME = "$env:RUNNER_TEMP\tb-home"
+          $p = Start-Process -FilePath dist\ToneBuilder.exe -ArgumentList "--no-browser","--port","8765" -PassThru
+          $ok = $false
+          for ($i = 0; $i -lt 30; $i++) {
+            Start-Sleep -Seconds 2
+            try {
+              $r = Invoke-RestMethod http://127.0.0.1:8765/api/status
+              if ($r.version) { $ok = $true; break }
+            } catch {}
+          }
+          Stop-Process -Id $p.Id -Force
+          if (-not $ok) { throw "L'eseguibile non risponde" }
+          Write-Host "Avvio verificato, versione $($r.version)"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ToneBuilder-windows
+          path: dist/ToneBuilder.exe
+
+      - name: Pubblica nella release "latest"
+        if: github.ref == 'refs/heads/main'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete latest --yes --cleanup-tag || true
+          gh release create latest dist/ToneBuilder.exe \
+            --title "Tone Builder per Windows (ultima versione)" \
+            --target "$GITHUB_SHA" \
+            --notes "Eseguibile costruito automaticamente dal commit ${GITHUB_SHA::7}. Scarica ToneBuilder.exe e avvialo con doppio clic."
+
+      - name: Pubblica la release della versione
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" dist/ToneBuilder.exe --title "Tone Builder $GITHUB_REF_NAME" --generate-notes

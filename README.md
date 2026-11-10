@@ -12,7 +12,16 @@ Dalla canzone al preset: descrivi il suono (o carica la traccia), e Tone Builder
 - **Scaletta**: tutti i brani di una serata in un progetto.
 - **AI a scelta**: Gemini, Claude, oppure qualsiasi servizio compatibile OpenAI (anche modelli locali con Ollama / LM Studio).
 
-## Installazione (Windows e macOS)
+## Windows: eseguibile pronto
+
+Scarica **ToneBuilder.exe** dalla sezione [Releases](https://github.com/imfabrizio/tone-builder/releases/tag/latest) e avvialo con doppio clic: si apre una finestra nera (il motore dell'app, lasciala aperta) e il browser con l'interfaccia. Per chiudere l'app chiudi quella finestra.
+
+- Non serve installare Python.
+- Al primo avvio Windows SmartScreen può mostrare "Windows ha protetto il PC", perché l'eseguibile non è firmato: *Ulteriori informazioni > Esegui comunque*.
+- L'eseguibile si aggiorna da solo a ogni modifica del codice: riscarica il file per avere l'ultima versione.
+- Non include la separazione della chitarra (Demucs, troppo pesante) né le misure audio di librosa: l'analisi della traccia la fa l'AI ascoltando il mix completo (con Gemini).
+
+## Installazione da sorgente (macOS, oppure Windows con Python)
 
 Serve Python 3.11 o successivo.
 
