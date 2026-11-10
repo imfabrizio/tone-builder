@@ -164,3 +164,19 @@ def test_import_hlx():
 
 def test_parse_json_tolerates_fences():
     assert parse_json('Ecco:\n```json\n{"a": {"b": "}"}}\n```') == {"a": {"b": "}"}}
+
+
+def test_helix_uses_only_library_blocks(recipe):
+    import dataclasses
+    full = HelixCatalog.load()
+    lib_ids = {"Agoura_AmpBritPlexi", "HD2_DistScream808Mono"}
+    models = {k: dataclasses.replace(m, in_library=k in lib_ids,
+                                     library_params=frozenset(m.params) if k in lib_ids else frozenset())
+              for k, m in full.models.items()}
+    cat = HelixCatalog(models)
+    b = hx.build_spec(recipe, cat)
+    used = [x["block"] for x in b.spec["paths"][0]["blocks"]]
+    assert set(used) <= lib_ids
+    assert "Agoura_AmpBritPlexi" in used  # 2203 sostituito con l'ampli disponibile
+    assert any("tolto" in w for w in b.warnings)  # cab/delay/reverb assenti dagli export
+    parse_spec(b.spec)

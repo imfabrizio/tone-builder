@@ -46,33 +46,48 @@ class _Result:
     stderr: str
 
 
-def _choose_model(b: Block, cat: HelixCatalog, warnings: list[str]) -> HelixModel:
-    if b.helix.model:
-        m = cat.get(b.helix.model)
-        if m:
-            return m
+def _choose_model(b: Block, cat: HelixCatalog, warnings: list[str]) -> HelixModel | None:
+    """Sceglie il modello Helix. Con la libreria popolata, helixgen sa generare
+    solo i blocchi che compaiono nei tuoi export: se il modello scelto non c'e',
+    usiamo il piu' simile tra quelli disponibili, o togliamo il blocco."""
+    need_lib = cat.library_ready()
+    wanted = cat.get(b.helix.model) if b.helix.model else None
+    if b.helix.model and not wanted:
         warnings.append(f"{b.id}: modello Helix '{b.helix.model}' non esiste, cerco un equivalente")
-    candidates = cat.search(f"{b.gear_ref} {b.label} {b.helix.model or ''}", b.role)
-    if not candidates:
-        candidates = cat.by_role(b.role)
-    if not candidates:
-        raise HelixError(f"{b.id}: nessun modello Helix disponibile per il ruolo {b.role.value}")
-    ready = [c for c in candidates if c.in_library] or candidates
-    m = ready[0]
-    warnings.append(f"{b.id}: scelto '{m.name}' ({m.model_id}) per '{b.gear_ref or b.role.value}'")
+    if wanted and (wanted.in_library or not need_lib):
+        return wanted
+    query = f"{b.gear_ref} {b.label} {wanted.name if wanted else ''} {b.helix.model or ''}"
+    pool = cat.search(query, b.role, limit=50)
+    if need_lib:
+        pool = [m for m in pool if m.in_library] or [m for m in cat.by_role(b.role) if m.in_library]
+    elif not pool:
+        pool = cat.by_role(b.role)
+    if not pool:
+        missing = wanted.name if wanted else (b.gear_ref or b.role.value)
+        warnings.append(
+            f"{b.id}: tolto dal preset Helix: nei tuoi export non c'e' nessun blocco "
+            f"{b.role.value} ('{missing}'). Esporta dallo Stadium un preset che lo contiene e ricaricalo."
+        )
+        return None
+    m = pool[0]
+    why = f"'{wanted.name}' non e' nei tuoi export" if wanted else f"per '{b.gear_ref or b.role.value}'"
+    warnings.append(f"{b.id}: uso '{m.name}' ({why})")
     return m
 
 
 def _native_params(b: Block, model: HelixModel, overrides: dict[str, float] | None,
                    warnings: list[str], where: str) -> dict[str, float]:
     params = model.visible_params()
+    if model.library_params:  # helixgen accetta solo i parametri visti negli export
+        params = {k: v for k, v in params.items() if k in model.library_params}
     settings = overrides if overrides is not None else b.settings
     out, missing = map_settings(settings, params)
     if missing:
         warnings.append(f"{where}: manopole senza equivalente su '{model.name}': {', '.join(missing)}")
-    if overrides is None:  # i valori nativi espliciti valgono solo per lo stato base
+    if overrides is None and b.helix.model == model.model_id:  # valori nativi solo se il modello e' quello
+        allowed = model.library_params or set(model.params)
         for k, v in b.helix.params.items():
-            if k in model.params:
+            if k in allowed:
                 out[k] = v
             else:
                 warnings.append(f"{where}: parametro nativo '{k}' sconosciuto su '{model.name}', ignorato")
@@ -99,7 +114,11 @@ def build_spec(recipe: ToneRecipe, cat: HelixCatalog | None = None) -> HelixBuil
             f"{MAX_BLOCKS_PER_PATH}. Usa il merge per ridurla."
         )
 
-    models = {b.id: _choose_model(b, cat, warnings) for b in chain}
+    chosen = {b.id: _choose_model(b, cat, warnings) for b in chain}
+    models = {bid: m for bid, m in chosen.items() if m is not None}
+    chain = [b for b in chain if b.id in models]
+    if not any(m.role == Role.amp or m.role == Role.preamp for m in models.values()):
+        warnings.append("Attenzione: nel preset Helix non c'e' nessun ampli. Esporta e carica almeno un preset con l'ampli che ti serve.")
     ids = [m.model_id for m in models.values()]
     has_dupes = len(ids) != len(set(ids))
 

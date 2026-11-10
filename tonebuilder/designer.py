@@ -111,11 +111,19 @@ def _catalog_block() -> str:
     )
 
 
+def _library_rule() -> str:
+    if HelixCatalog.load().library_ready():
+        return ("\nIMPORTANTE: per helix.model usa SOLO i modelli segnati con * (sono gli unici che il "
+                "generatore di preset Helix sa costruire su questo computer). Se nessun modello * va bene per "
+                "un ruolo, scegli il * piu' vicino e spiegalo nelle notes.\n")
+    return ""
+
+
 def system_prompt() -> str:
     return (
         "Sei un tecnico del suono esperto di chitarra e di multieffetti Line 6 Helix Stadium e "
         "Neural DSP Quad Cortex. Progetti preset pronti all'uso partendo da una canzone e da una descrizione.\n"
-        + RECIPE_FORMAT + KNOB_RULES + RULES + "\n" + _catalog_block()
+        + RECIPE_FORMAT + KNOB_RULES + RULES + _library_rule() + "\n" + _catalog_block()
     )
 
 

@@ -53,6 +53,7 @@ class HelixModel:
     name: str
     params: dict[str, ParamDef] = field(default_factory=dict)
     in_library: bool = False
+    library_params: frozenset[str] = frozenset()  # parametri accettati da helixgen per questo blocco
 
     @property
     def role(self) -> Role:
@@ -76,14 +77,14 @@ def _load_defs() -> dict:
         return json.load(fh)
 
 
-def _library_blocks() -> dict[str, str]:
-    """model_id -> display_name per i blocchi presenti nella libreria helixgen."""
+def _library_blocks() -> dict[str, tuple[str, frozenset[str]]]:
+    """model_id -> (display_name, parametri) per i blocchi nella libreria helixgen."""
     try:
         from helixgen.home import library_dir
         from helixgen.library import Library
 
         lib = Library(library_dir())
-        return {b.model_id: b.display_name for b in lib.list_blocks()}
+        return {b.model_id: (b.display_name, frozenset(b.params)) for b in lib.list_blocks()}
     except Exception:
         return {}
 
@@ -109,7 +110,8 @@ class HelixCatalog:
                 for k, v in raw.items()
                 if isinstance(v, dict) and "min" in v and "max" in v
             }
-            models[mid] = HelixModel(mid, cat, lib.get(mid) or humanize(mid), params, mid in lib)
+            name, lparams = lib.get(mid, (humanize(mid), frozenset()))
+            models[mid] = HelixModel(mid, cat, name, params, mid in lib, lparams)
         return cls(models)
 
     @staticmethod
