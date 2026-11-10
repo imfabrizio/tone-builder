@@ -61,6 +61,7 @@ FORMATO DELLA RICETTA (JSON):
       "role": "uno tra: gate, comp, wah, pitch, drive, amp, preamp, cab, ir, eq, mod, delay, reverb, volume, filter",
       "gear_ref": "ampli/pedale REALE di riferimento, es. 'Marshall JCM800 2203', 'Ibanez TS808'",
       "label": "etichetta corta per il footswitch, es. 'TS808'",
+      "line": 1,
       "enabled": true,
       "settings": {"manopola": valore},
       "ir": null,
@@ -90,7 +91,12 @@ REGOLE:
    qc.model = id numerico (prima colonna del catalogo QC). I modelli Helix con * sono gia' pronti nella libreria dell'utente: preferiscili a parita' di suono.
 2. Ricrea il suono della canzone: strumentazione originale se nota, altrimenti l'equivalente piu' vicino.
 3. Adatta il gain alla chitarra dell'utente (single coil vs humbucker).
-4. Catena compatta: massimo 8 blocchi (limite di una riga del Quad Cortex), in ordine di segnale.
+4. Sfrutta i dispositivi: sono potenti. Hai DUE LINEE in serie ("line": 1 o 2), ognuna con un DSP suo:
+   - linea 1 (max 8 blocchi): gate, compressore, wah, boost e drive, ampli (anche 2 ampli diversi, es. uno pulito
+     e uno saturo accesi in snapshot diversi), cab/IR;
+   - linea 2 (max 8 blocchi): EQ, modulazioni (chorus, flanger, phaser, tremolo), delay, riverberi, volume/boost finale.
+   Una patch completa da live ha di solito 10-14 blocchi. Non lasciare la linea 2 vuota se il brano usa effetti.
+   Ordine dei blocchi = ordine del segnale dentro ogni linea.
 5. Uno snapshot per ogni sezione richiesta (max 8). Negli snapshot cambia solo cio' che serve:
    on/off dei blocchi in "enabled", valori diversi in "overrides". Usa level_db per bilanciare i volumi (es. +2 nell'assolo).
 6. Se nella ricerca hai trovato preset o IR GRATUITI ben valutati, usali come riferimento per le impostazioni e citali nelle "notes".

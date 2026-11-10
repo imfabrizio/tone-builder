@@ -40,18 +40,24 @@ class LLMProvider(ABC):
     def complete_text(self, system: str, user: str, *, audio_path: str | None = None) -> str: ...
 
     def complete_json(self, system: str, user: str, *, audio_path: str | None = None) -> dict[str, Any]:
-        text = self.complete_text(
-            system + "\n\nRispondi SOLO con un oggetto JSON valido, senza testo prima o dopo.",
-            user,
-            audio_path=audio_path,
-        )
-        return parse_json(text)
+        sys2 = system + "\n\nRispondi SOLO con un oggetto JSON valido, senza testo prima o dopo."
+        text = self.complete_text(sys2, user, audio_path=audio_path)
+        try:
+            return parse_json(text)
+        except AIError:
+            # spesso e' una risposta troncata: riprova chiedendo JSON compatto
+            text = self.complete_text(sys2 + COMPACT_HINT, user, audio_path=audio_path)
+            return parse_json(text)
 
     def research(self, question: str) -> ResearchResult:
         raise AIError(f"{self.name} non supporta la ricerca web in questa configurazione")
 
     def list_models(self) -> list[str]:
         return [self.model]
+
+
+COMPACT_HINT = ("\nLa risposta precedente era incompleta: scrivi JSON compatto su una riga, senza spazi "
+                "superflui, note brevi e senza campi vuoti.")
 
 
 def parse_json(text: str) -> dict[str, Any]:

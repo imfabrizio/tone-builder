@@ -30,7 +30,8 @@ class GeminiProvider(LLMProvider):
         return [f, user]
 
     def complete_text(self, system: str, user: str, *, audio_path: str | None = None) -> str:
-        cfg = self._types.GenerateContentConfig(system_instruction=system, temperature=0.4)
+        cfg = self._types.GenerateContentConfig(system_instruction=system, temperature=0.4,
+                                                max_output_tokens=32768)
         try:
             r = self._client.models.generate_content(model=self.model, contents=self._contents(user, audio_path), config=cfg)
         except Exception as e:
@@ -38,13 +39,22 @@ class GeminiProvider(LLMProvider):
         return r.text or ""
 
     def complete_json(self, system: str, user: str, *, audio_path: str | None = None):
-        from .base import parse_json
+        from .base import COMPACT_HINT, parse_json
 
         cfg = self._types.GenerateContentConfig(
-            system_instruction=system, temperature=0.4, response_mime_type="application/json"
+            system_instruction=system, temperature=0.4, response_mime_type="application/json",
+            max_output_tokens=32768,
         )
+        contents = self._contents(user, audio_path)
         try:
-            r = self._client.models.generate_content(model=self.model, contents=self._contents(user, audio_path), config=cfg)
+            r = self._client.models.generate_content(model=self.model, contents=contents, config=cfg)
+            try:
+                return parse_json(r.text or "")
+            except AIError:  # risposta troncata: riprova chiedendo JSON compatto
+                cfg.system_instruction = system + COMPACT_HINT
+                r = self._client.models.generate_content(model=self.model, contents=contents, config=cfg)
+        except AIError:
+            raise
         except Exception as e:
             raise AIError(f"Gemini: {e}") from e
         return parse_json(r.text or "")

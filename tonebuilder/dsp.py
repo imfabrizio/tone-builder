@@ -16,7 +16,7 @@ from .config import app_home
 from .recipe import Block, Role, ToneRecipe
 
 DEFAULT_WEIGHTS: dict[str, dict[str, float]] = {
-    # Helix Stadium: % di UN percorso (un preset puo' usarne due)
+    # Helix Stadium: % di UN percorso (linea); un preset ne usa due
     "helix": {
         "amp": 28, "preamp": 14, "cab": 9, "ir": 6, "drive": 6, "comp": 4, "gate": 2,
         "wah": 4, "pitch": 22, "eq": 3, "mod": 8, "delay": 8, "reverb": 13,
@@ -24,9 +24,9 @@ DEFAULT_WEIGHTS: dict[str, dict[str, float]] = {
     },
     # Quad Cortex: % del budget dell'intero preset
     "qc": {
-        "amp": 20, "preamp": 12, "cab": 6, "ir": 5, "drive": 4, "comp": 3, "gate": 2,
-        "wah": 3, "pitch": 16, "eq": 3, "mod": 6, "delay": 6, "reverb": 10,
-        "volume": 1, "filter": 5, "synth": 14, "looper": 4, "other": 4,
+        "amp": 15, "preamp": 9, "cab": 4, "ir": 4, "drive": 3, "comp": 2, "gate": 1,
+        "wah": 2, "pitch": 12, "eq": 2, "mod": 4, "delay": 4, "reverb": 7,
+        "volume": 1, "filter": 4, "synth": 10, "looper": 3, "other": 3,
     },
 }
 
@@ -67,15 +67,14 @@ class DspEstimate:
 
 
 def estimate(recipe: ToneRecipe) -> DspEstimate:
-    return DspEstimate(
-        helix=sum(block_cost(b, "helix") for b in recipe.chain),
-        qc=sum(block_cost(b, "qc") for b in recipe.chain),
-    )
+    # Helix: ogni linea gira su un suo percorso/DSP -> conta la linea piu' carica
+    per_line = [sum(block_cost(b, "helix") for b in recipe.chain if b.line == ln) for ln in (1, 2)]
+    return DspEstimate(helix=max(per_line), qc=sum(block_cost(b, "qc") for b in recipe.chain))
 
 
 def estimate_blocks(blocks: list[Block]) -> DspEstimate:
-    return DspEstimate(sum(block_cost(b, "helix") for b in blocks),
-                       sum(block_cost(b, "qc") for b in blocks))
+    per_line = [sum(block_cost(b, "helix") for b in blocks if b.line == ln) for ln in (1, 2)]
+    return DspEstimate(max(per_line), sum(block_cost(b, "qc") for b in blocks))
 
 
 ROLE_ORDER = [Role.gate, Role.comp, Role.wah, Role.pitch, Role.filter, Role.drive, Role.amp,

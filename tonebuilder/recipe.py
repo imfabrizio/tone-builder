@@ -55,6 +55,7 @@ class Block(BaseModel):
     role: Role
     gear_ref: str = ""  # ampli/pedale reale di riferimento, es. "Marshall JCM800"
     label: str = ""  # etichetta breve per footswitch/scribble strip
+    line: int = Field(1, ge=1, le=2)  # linea 1 (pre/ampli) o 2 (effetti), in serie
     enabled: bool = True
     settings: dict[str, float] = Field(default_factory=dict)
     ir: str | None = None  # nome/percorso IR per cab o blocco IR
@@ -130,6 +131,9 @@ class ToneRecipe(BaseModel):
         if len(self.snapshots) > 8:
             raise ValueError("massimo 8 snapshot/scene")
         return self
+
+    def line_blocks(self, line: int) -> list[Block]:
+        return [b for b in self.chain if b.line == line]
 
     def block(self, block_id: str) -> Block:
         for b in self.chain:

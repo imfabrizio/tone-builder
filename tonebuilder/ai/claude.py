@@ -33,7 +33,7 @@ class ClaudeProvider(LLMProvider):
     def complete_text(self, system: str, user: str, *, audio_path: str | None = None) -> str:
         try:
             r = self._client.messages.create(
-                model=self.model, max_tokens=8000, system=system,
+                model=self.model, max_tokens=16000, system=system,
                 messages=[{"role": "user", "content": user}],
             )
         except Exception as e:

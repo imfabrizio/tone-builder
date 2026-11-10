@@ -300,7 +300,7 @@ function renderBoard() {
   const r = recipe();
   if (!r) return;
   const fsOf = (id) => (r.footswitches || []).filter((f) => f.block_id === id).map((f) => f.switch).join(" ");
-  $("#board").innerHTML = r.chain.map((b) => {
+  const pedal = (b) => {
     const knobs = Object.entries(b.settings || {}).slice(0, 5)
       .map(([k, v]) => `<span class="knob">${esc(KNOB_IT[k] || k)} ${esc(v)}</span>`).join("");
     const fs = fsOf(b.id);
@@ -313,14 +313,21 @@ function renderBoard() {
         <span class="knobs">${knobs}</span>
         ${fs ? `<span class="fs">${esc(fs)}</span>` : ""}
       </div>`;
-  }).join("") + `<button class="btn ghost" id="addBlock" style="align-self:center;z-index:1">Aggiungi blocco</button>`;
+  };
+  $("#board").innerHTML = [1, 2].map((ln) => {
+    const blocks = r.chain.filter((b) => (b.line || 1) === ln);
+    return `<div class="line-label">Linea ${ln}${ln === 1 ? " · ingresso" : " · uscita"} <span>${blocks.length} blocchi</span></div>
+      <div class="line" data-line="${ln}">${blocks.map(pedal).join("")}
+        <button class="btn ghost add-block" data-add-line="${ln}">Aggiungi blocco</button></div>`;
+  }).join("");
 
   // matrice
   const snaps = r.snapshots || [];
   let html = `<thead><tr><th></th>${snaps.map((s, i) => `<th data-snap="${i}" title="Modifica snapshot">${esc(s.name)}</th>`).join("")}
     ${snaps.length < 8 ? `<th class="add" data-snap="new">Aggiungi</th>` : ""}</tr></thead><tbody>`;
-  for (const b of r.chain) {
-    html += `<tr style="--c: var(--r-${b.role})"><th><span class="swatch"></span>${esc(b.label || b.gear_ref || b.id)}</th>`;
+  const ordered = [...r.chain].sort((a, b) => (a.line || 1) - (b.line || 1));
+  for (const b of ordered) {
+    html += `<tr style="--c: var(--r-${b.role})"><th><span class="swatch"></span>${esc(b.label || b.gear_ref || b.id)}${(b.line || 1) === 2 ? " <small>L2</small>" : ""}</th>`;
     snaps.forEach((s, i) => {
       const on = effOn(b, s);
       const ov = s.overrides?.[b.id];
@@ -374,6 +381,9 @@ function renderBlockEditor() {
       <div class="field"><label>Riferimento reale</label><input data-f="gear_ref" value="${esc(b.gear_ref)}"></div>
       <div class="field"><label>Etichetta</label><input data-f="label" value="${esc(b.label)}" maxlength="16"></div>
       <div class="field"><label>Footswitch</label><select data-f="fs">${fsOpts}</select></div>
+      <div class="field"><label>Linea</label><select data-f="line">
+        <option value="1" ${(b.line || 1) === 1 ? "selected" : ""}>Linea 1 (ingresso, ampli)</option>
+        <option value="2" ${b.line === 2 ? "selected" : ""}>Linea 2 (effetti in uscita)</option></select></div>
       <div class="field"><label>Modello Helix</label><input data-f="helix" value="${esc(b.helix?.model || "")}" list="helixModels"></div>
       <div class="field"><label>Modello Quad Cortex</label><input data-f="qc" value="${esc(b.qc?.model ?? "")}"></div>
       <div class="field"><label>IR (nome file)</label><input data-f="ir" value="${esc(b.ir || "")}"></div>
@@ -435,11 +445,12 @@ function bindPreset() {
   $("#presetName").addEventListener("change", (e) => { recipe().name = e.target.value.slice(0, 32); recipeChanged(); });
 
   $("#board").addEventListener("click", (e) => {
-    if (e.target.id === "addBlock") {
+    const addLine = e.target.dataset.addLine;
+    if (addLine) {
       const r = recipe();
       let n = 1; while (r.chain.some((b) => b.id === `fx${n}`)) n++;
-      r.chain.push({ id: `fx${n}`, role: "delay", gear_ref: "", label: "", enabled: true, settings: {}, ir: null,
-        helix: { model: null, params: {} }, qc: { model: null, params: {} }, notes: "", source: "" });
+      r.chain.push({ id: `fx${n}`, role: addLine === "2" ? "delay" : "drive", gear_ref: "", label: "", line: +addLine,
+        enabled: true, settings: {}, ir: null, helix: { model: null, params: {} }, qc: { model: null, params: {} }, notes: "", source: "" });
       S.selBlock = `fx${n}`;
       recipeChanged();
       return;
@@ -468,6 +479,7 @@ function bindPreset() {
     else if (f === "helix") b.helix = { ...(b.helix || {}), model: e.target.value.trim() || null, params: {} };
     else if (f === "qc") b.qc = { ...(b.qc || {}), model: e.target.value.trim() || null, params: {} };
     else if (f === "ir") b.ir = e.target.value.trim() || null;
+    else if (f === "line") b.line = +e.target.value;
     else if (f === "fs") {
       r.footswitches = (r.footswitches || []).filter((x) => x.block_id !== b.id && x.switch !== e.target.value);
       if (e.target.value) r.footswitches.push({ switch: e.target.value, block_id: b.id, label: b.label || "" });
@@ -480,7 +492,9 @@ function bindPreset() {
     const i = r.chain.findIndex((x) => x.id === S.selBlock);
     if (e.target.dataset.delK) { delete r.chain[i].settings[e.target.dataset.delK]; recipeChanged(); }
     else if (e.target.dataset.move) {
-      const j = i + parseInt(e.target.dataset.move, 10);
+      const dir = parseInt(e.target.dataset.move, 10);
+      let j = i + dir;
+      while (j >= 0 && j < r.chain.length && (r.chain[j].line || 1) !== (r.chain[i].line || 1)) j += dir;
       if (j < 0 || j >= r.chain.length) return;
       [r.chain[i], r.chain[j]] = [r.chain[j], r.chain[i]];
       recipeChanged();
@@ -553,6 +567,8 @@ function renderAssist() {
   const s = song();
   $("#chat").innerHTML = (s?.chat || []).map((m) => `<div class="msg ${m.who} ${m.err ? "err" : ""}">${esc(m.text)}</div>`).join("")
     || `<p class="hint">Quando il preset è pronto puoi chiedere modifiche, come faresti con un tecnico del suono.</p>`;
+  const chat = $("#chat");
+  chat.scrollTop = chat.scrollHeight;
   $("#researchText").textContent = s?.research || "Ancora nessuna ricerca.";
   const links = [...(s?.sources || []), ...(s?.links || [])];
   $("#sourceLinks").innerHTML = links.map((l) => `<li><a href="${esc(l.url)}" target="_blank" rel="noopener">${esc(l.title)}</a></li>`).join("");
@@ -583,6 +599,63 @@ async function sendChat(e) {
   }
   renderAssist();
   saveSoon();
+}
+
+function duplicateSong() {
+  const s = song();
+  if (!s?.recipe) return;
+  const name = prompt("Nome del nuovo preset (lo trovi come nuovo brano nella scaletta)", `${s.recipe.name} 2`);
+  if (!name) return;
+  const title = prompt("Titolo del brano per cui lo userai (puoi lasciarlo uguale)", name) || name;
+  const copy = JSON.parse(JSON.stringify(s));
+  copy.id = uid();
+  copy.title = title;
+  copy.recipe.name = name.slice(0, 32);
+  copy.recipe.song = { ...(copy.recipe.song || {}), title };
+  copy.chat = [{ who: "ai", text: `Creato partendo da "${s.recipe.name}". Chiedimi le modifiche per questo brano.` }];
+  S.setlist.songs.splice(S.songIdx + 1, 0, copy);
+  saveSoon();
+  openSong(S.songIdx + 1);
+  toast(`Creato "${name}"`);
+}
+
+/* ---------------------------------------------------------------- voce */
+
+const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition;
+function attachMic(field) {
+  if (!SpeechRec || !field) return;
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "btn icon mic";
+  btn.title = "Detta a voce";
+  btn.setAttribute("aria-label", "Detta a voce");
+  btn.innerHTML = '<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M12 14a3 3 0 0 0 3-3V5a3 3 0 1 0-6 0v6a3 3 0 0 0 3 3Zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11Z"/></svg>';
+  const wrap = document.createElement("div");
+  wrap.className = "with-mic";
+  field.parentNode.insertBefore(wrap, field);
+  wrap.append(field, btn);
+  let rec = null;
+  btn.addEventListener("click", () => {
+    if (rec) { rec.stop(); return; }
+    rec = new SpeechRec();
+    rec.lang = "it-IT";
+    rec.interimResults = true;
+    rec.continuous = true;
+    const base = field.value ? field.value.replace(/\s*$/, " ") : "";
+    let finalText = "";
+    rec.onresult = (ev) => {
+      let interim = "";
+      for (let i = ev.resultIndex; i < ev.results.length; i++) {
+        const t = ev.results[i][0].transcript;
+        if (ev.results[i].isFinal) finalText += t; else interim += t;
+      }
+      field.value = base + finalText + interim;
+    };
+    rec.onerror = (ev) => toast(ev.error === "not-allowed" ? "Consenti l'uso del microfono al browser" : `Dettatura: ${ev.error}`, true);
+    rec.onend = () => { rec = null; btn.classList.remove("rec"); field.dispatchEvent(new Event("change")); };
+    btn.classList.add("rec");
+    rec.start();
+  });
 }
 
 /* ---------------------------------------------------------------- dispositivi */
@@ -930,6 +1003,8 @@ function bindAll() {
   $("#chatInput").addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); $("#chatForm").requestSubmit(); } });
 
   $("#helixBtn").addEventListener("click", () => makeHelix().catch(() => {}));
+  $("#dupBtn").addEventListener("click", duplicateSong);
+  ["#chatInput", "#reqDescription", "#reqSnapshots", "#reqPrefs", "#reqGuitar"].forEach((sel) => attachMic($(sel)));
   $("#qcBtn").addEventListener("click", openQC);
   $("#qcPlanBtn").addEventListener("click", () => qcPlan().catch(() => {}));
   $("#qcConfirm").addEventListener("change", (e) => { $("#qcRunBtn").disabled = !(e.target.checked && S.qcPlan); });

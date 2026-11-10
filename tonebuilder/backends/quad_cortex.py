@@ -103,27 +103,44 @@ def build_plan(recipe: ToneRecipe, slot: str, cat: QCCatalog | None = None,
             "impostati solo dopo il primo collegamento (Impostazioni > Leggi catalogo QC)."
         )
     chain = [b for b in recipe.chain if b.role != Role.looper]
-    if len(chain) > COLUMNS:
-        raise QCError(f"La catena ha {len(chain)} blocchi: su una riga del QC ne stanno {COLUMNS}. Usa il merge per ridurla.")
+    lines = {ln: [b for b in chain if b.line == ln] for ln in (1, 2)}
+    if not lines[1] and lines[2]:
+        lines = {1: lines[2], 2: []}
+    for ln, blist in lines.items():
+        if len(blist) > COLUMNS:
+            raise QCError(f"La linea {ln} ha {len(blist)} blocchi: su una riga del QC ne stanno {COLUMNS}. "
+                          "Sposta qualche blocco sull'altra linea.")
 
     if clear_grid:
         plan.steps.append(Step("clear_grid", {}, "Svuota la griglia corrente"))
 
+    # linea 1 -> riga 1 della griglia (indice 0); linea 2 -> riga 3 (indice 2),
+    # collegata in serie come nei preset di fabbrica
+    row_of = {1: 0, 2: 2}
     models: dict[str, QCModel] = {}
-    for col, b in enumerate(chain):
-        m = _choose(b, cat, plan.warnings)
-        if not m:
-            continue
-        models[b.id] = m
-        plan.placement[b.id] = (0, col, m.id)
-        plan.steps.append(Step("set_block", {"row": 0, "column": col, "model": m.id},
-                               f"Riga 1, colonna {col + 1}: {m.name} ({b.label or b.role.value})"))
-        for pname, val in _params(b, m, b.settings, True, plan.warnings, b.id).items():
-            plan.steps.append(Step("set_param", {"row": 0, "column": col, "model": m.id, "param": pname, "real": val},
-                                   f"{m.name}: {pname} = {val}"))
-        if b.ir and b.role in (Role.ir, Role.cab):
-            plan.steps.append(Step("set_ir", {"row": 0, "column": col, "ir_name": b.ir},
-                                   f"{m.name}: IR '{b.ir}' (se presente nel QC)"))
+    for ln in (1, 2):
+        row = row_of[ln]
+        for col, b in enumerate(lines[ln]):
+            m = _choose(b, cat, plan.warnings)
+            if not m:
+                continue
+            models[b.id] = m
+            plan.placement[b.id] = (row, col, m.id)
+            plan.steps.append(Step("set_block", {"row": row, "column": col, "model": m.id},
+                                   f"Riga {row + 1}, colonna {col + 1}: {m.name} ({b.label or b.role.value})"))
+            for pname, val in _params(b, m, b.settings, True, plan.warnings, b.id).items():
+                plan.steps.append(Step("set_param", {"row": row, "column": col, "model": m.id, "param": pname, "real": val},
+                                       f"{m.name}: {pname} = {val}"))
+            if b.ir and b.role in (Role.ir, Role.cab):
+                plan.steps.append(Step("set_ir", {"row": row, "column": col, "ir_name": b.ir},
+                                       f"{m.name}: IR '{b.ir}' (se presente nel QC)"))
+    if lines[2]:
+        plan.steps.append(Step("route", {"row": 0, "output": 16},
+                               "Uscita riga 1 -> riga 3 (le due linee in serie)"))
+        plan.steps.append(Step("route", {"row": 2, "output": 19},
+                               "Uscita riga 3 -> uscite principali"))
+        plan.manual.append("Controlla sul QC che la riga 3 suoni: se resta muta, imposta il suo ingresso su "
+                           "'Prev. Row' (tocca l'ingresso a sinistra della riga 3).")
 
     bypass_blocks = recipe.snapshot_controlled_bypass()
     for i, s in enumerate(recipe.snapshots):
@@ -155,7 +172,7 @@ def build_plan(recipe: ToneRecipe, slot: str, cat: QCCatalog | None = None,
             states = ", ".join(f"{SCENES[i]}={'ON' if s.enabled.get(bid, b.enabled) else 'off'}"
                                for i, s in enumerate(recipe.snapshots))
             plan.manual.append(
-                f"Sul QC tieni premuto '{m.name}' (riga 1, col. {col + 1}) e attiva la modalita' scena; "
+                f"Sul QC tieni premuto '{m.name}' (riga {row + 1}, col. {col + 1}) e attiva la modalita' scena; "
                 f"poi premi 'Applica on/off per scena'. Stati: {states}"
             )
 
@@ -223,6 +240,8 @@ def execute_plan(plan: QCPlan, progress: Callable[[int, int, str], None] | None 
                             qc.remove_block(row, col)
                 elif st.action == "set_block":
                     qc.set_block(a["row"], a["column"], a["model"])
+                elif st.action == "route":
+                    qc.set_chain_output(a["row"], a["output"])
                 elif st.action == "set_param":
                     kw = dict(param=a["param"], model=a["model"], real=a["real"])
                     if "scene" in a:

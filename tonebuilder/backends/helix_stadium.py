@@ -104,23 +104,38 @@ def _switch_name(s: str) -> str:
 
 
 def build_spec(recipe: ToneRecipe, cat: HelixCatalog | None = None) -> HelixBuild:
-    """Traduce la ricetta nel formato recipe di helixgen."""
+    """Traduce la ricetta nel formato recipe di helixgen.
+
+    Linea 1 -> percorso 1 (path 0), linea 2 -> percorso 2 (path 1). Se la linea
+    2 e' usata, l'uscita del percorso 1 entra nel percorso 2 (in serie).
+    """
     cat = cat or HelixCatalog.load()
     warnings: list[str] = []
     chain = [b for b in recipe.chain if b.role != Role.looper]
-    if len(chain) > MAX_BLOCKS_PER_PATH:
-        raise HelixError(
-            f"La catena ha {len(chain)} blocchi: su un percorso Stadium ne stanno "
-            f"{MAX_BLOCKS_PER_PATH}. Usa il merge per ridurla."
-        )
+    for ln in (1, 2):
+        n = sum(1 for b in chain if b.line == ln)
+        if n > MAX_BLOCKS_PER_PATH:
+            raise HelixError(
+                f"La linea {ln} ha {n} blocchi: su un percorso Stadium ne stanno "
+                f"{MAX_BLOCKS_PER_PATH}. Sposta qualche blocco sull'altra linea."
+            )
 
     chosen = {b.id: _choose_model(b, cat, warnings) for b in chain}
     models = {bid: m for bid, m in chosen.items() if m is not None}
     chain = [b for b in chain if b.id in models]
     if not any(m.role == Role.amp or m.role == Role.preamp for m in models.values()):
-        warnings.append("Attenzione: nel preset Helix non c'e' nessun ampli. Esporta e carica almeno un preset con l'ampli che ti serve.")
+        warnings.append("Attenzione: nel preset Helix non c'e' nessun ampli. Importa dallo Stadium almeno un preset con l'ampli che ti serve.")
     ids = [m.model_id for m in models.values()]
     has_dupes = len(ids) != len(set(ids))
+
+    lines = {ln: [b for b in chain if b.line == ln] for ln in (1, 2)}
+    if not lines[1] and lines[2]:  # tutto sulla linea 2: lo riportiamo sulla 1
+        lines = {1: lines[2], 2: []}
+    use_two = bool(lines[2])
+    where = {}  # block_id -> (path, pos)
+    for ln, blist in lines.items():
+        for i, b in enumerate(blist):
+            where[b.id] = (ln - 1, i + 1)
 
     # Stato base: acceso se acceso in base o in almeno uno snapshot; gli
     # snapshot di helixgen sanno solo SPEGNERE rispetto alla base.
@@ -129,25 +144,35 @@ def build_spec(recipe: ToneRecipe, cat: HelixCatalog | None = None) -> HelixBuil
     def ref(bid: str) -> dict[str, Any]:
         r: dict[str, Any] = {"block": models[bid].model_id}
         if has_dupes:
-            r["pos"] = [b.id for b in chain].index(bid) + 1
+            path, pos = where[bid]
+            r["path"], r["pos"] = path, pos
         return r
 
-    blocks = []
-    for i, b in enumerate(chain):
-        m = models[b.id]
-        entry: dict[str, Any] = {"block": m.model_id}
-        params = _native_params(b, m, None, warnings, b.id)
-        if params:
-            entry["params"] = params
-        if not base_on[b.id]:
-            entry["enabled"] = False
-        if has_dupes:
-            entry["pos"] = i + 1
-        if b.ir and b.role in (Role.cab, Role.ir):
-            entry["ir"] = Path(b.ir).name
-        blocks.append(entry)
+    paths = []
+    for ln in (1, 2):
+        if not lines[ln]:
+            continue
+        blocks = []
+        for b in lines[ln]:
+            m = models[b.id]
+            entry: dict[str, Any] = {"block": m.model_id}
+            params = _native_params(b, m, None, warnings, b.id)
+            if params:
+                entry["params"] = params
+            if not base_on[b.id]:
+                entry["enabled"] = False
+            if has_dupes:
+                entry["pos"] = where[b.id][1]
+            if b.ir and b.role in (Role.cab, Role.ir):
+                entry["ir"] = Path(b.ir).name
+            blocks.append(entry)
+        paths.append({"blocks": blocks})
+    if use_two:
+        paths[0]["output"] = {"to": "path2a"}  # linea 1 -> linea 2, in serie
+        paths[1]["input"] = "none"  # la linea 2 riceve solo dalla linea 1
+    last_path = len(paths) - 1
 
-    spec: dict[str, Any] = {"name": recipe.name[:32], "paths": [{"blocks": blocks}]}
+    spec: dict[str, Any] = {"name": recipe.name[:32], "paths": paths}
     if recipe.song.artist:
         spec["author"] = recipe.song.artist[:32]
 
@@ -168,7 +193,7 @@ def build_spec(recipe: ToneRecipe, cat: HelixCatalog | None = None) -> HelixBuil
         if plist:
             sd["params"] = plist
         if s.level_db is not None:
-            sd["output"] = [{"path": 0, "level": s.level_db}]
+            sd["output"] = [{"path": last_path, "level": s.level_db}]
         snaps.append(sd)
     if snaps:
         spec["snapshots"] = snaps

@@ -207,3 +207,19 @@ def test_stadium_import_flow(tmp_path, monkeypatch):
     assert res["converted"] == 2 and len(res["failed"]) == 1
     assert ingested == ["user", "factory"]  # i preset dell'utente per primi: fanno da telaio
     assert ["device", "info"] in calls
+
+
+def test_two_lines_on_both_devices(recipe):
+    for b in recipe.chain:
+        if b.role in (Role.delay, Role.reverb):
+            b.line = 2
+    spec = hx.build_spec(recipe).spec
+    assert len(spec["paths"]) == 2 and spec["paths"][0]["output"] == {"to": "path2a"}
+    parse_spec(spec)
+    plan = qcb.build_plan(recipe, "30A", QCCatalog.load())
+    rows = {bid: pl[0] for bid, pl in plan.placement.items()}
+    assert rows["dly1"] == 2 and rows["amp1"] == 0
+    assert [s.args for s in plan.steps if s.action == "route"] == [{"row": 0, "output": 16}, {"row": 2, "output": 19}]
+    fake = FakeQC()
+    qcb.execute_plan(plan, client=fake)
+    assert ("set_chain_output", (0, 16), {}) in fake.calls
