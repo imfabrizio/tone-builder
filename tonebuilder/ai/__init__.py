@@ -19,7 +19,7 @@ def get_provider(settings: Settings, name: str | None = None) -> LLMProvider:
     if name == "claude":
         from .claude import ClaudeProvider
 
-        return ClaudeProvider(ps.api_key, ps.model, ps.base_url)
+        return ClaudeProvider(ps.api_key, ps.model, ps.base_url, workspace_id=ps.workspace_id)
     if name == "openai":
         from .openai_compat import OpenAICompatProvider
 

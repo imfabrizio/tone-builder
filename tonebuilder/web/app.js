@@ -680,6 +680,7 @@ function renderProviderFields() {
       <button type="button" class="btn" id="pfList">Elenca modelli</button>
     </div>
     <datalist id="pfModels"></datalist>
+    ${S.editProvider === "claude" ? `<div class="field"><label for="pfWs">ID workspace (solo se la chiave non appartiene a un workspace)</label><input id="pfWs" value="${esc(p.workspace_id || "")}" placeholder="wrkspc_…"></div>` : ""}
     ${S.editProvider === "openai" ? `<div class="field"><label for="pfBase">Indirizzo API</label><input id="pfBase" value="${esc(p.base_url)}" placeholder="https://api.openai.com/v1 oppure http://localhost:11434/v1"></div>` : ""}`;
 }
 
@@ -687,7 +688,8 @@ async function saveSettings() {
   const body = {
     provider: S.editProvider,
     providers: { [S.editProvider]: { model: $("#pfModel").value.trim(), api_key: $("#pfKey").value.trim(),
-      ...($("#pfBase") ? { base_url: $("#pfBase").value.trim() } : {}) } },
+      ...($("#pfBase") ? { base_url: $("#pfBase").value.trim() } : {}),
+      ...($("#pfWs") ? { workspace_id: $("#pfWs").value.trim() } : {}) } },
     web_research: $("#webResearch").checked,
     helix_output_dir: $("#helixOut").value.trim(),
     qc_target_setlist_slot: $("#qcSlot").value.trim(),
@@ -818,7 +820,9 @@ function bindAll() {
   $("#providerFields").addEventListener("click", async (e) => {
     if (e.target.id !== "pfList") return;
     try {
-      if ($("#pfKey").value.trim()) await api("PUT", "/api/settings", { providers: { [S.editProvider]: { api_key: $("#pfKey").value.trim() } } });
+      const pv = { api_key: $("#pfKey").value.trim() };
+      if ($("#pfWs")) pv.workspace_id = $("#pfWs").value.trim();
+      await api("PUT", "/api/settings", { providers: { [S.editProvider]: pv } });
       const list = await busy("Chiedo l'elenco dei modelli…", () => api("GET", `/api/providers/${S.editProvider}/models`));
       $("#pfModels").innerHTML = list.map((m) => `<option value="${esc(m)}">`).join("");
       toast(`${list.length} modelli disponibili: scegli dal campo Modello`);

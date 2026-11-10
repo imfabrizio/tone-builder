@@ -101,7 +101,7 @@ def update_settings(body: SettingsIn) -> dict[str, Any]:
         s.provider = body.provider
     for name, vals in body.providers.items():
         cur = s.providers.get(name, ProviderSettings())
-        for k in ("model", "base_url"):
+        for k in ("model", "base_url", "workspace_id"):
             if k in vals:
                 setattr(cur, k, vals[k])
         if vals.get("api_key"):  # campo vuoto = lascia la chiave esistente

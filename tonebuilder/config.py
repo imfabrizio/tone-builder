@@ -25,6 +25,7 @@ class ProviderSettings(BaseModel):
     api_key: str = ""
     model: str = ""
     base_url: str = ""  # solo per provider compatibili OpenAI (OpenAI, Ollama, LM Studio...)
+    workspace_id: str = ""  # solo Claude: chiavi non legate a un workspace (header anthropic-workspace-id)
 
 
 class Settings(BaseModel):
