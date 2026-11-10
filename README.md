@@ -79,7 +79,7 @@ Al primo utilizzo Demucs scarica il modello (circa 80 MB). La separazione di un 
 Tutto da **Impostazioni** nell'app:
 
 1. **AI**: incolla la chiave API (Gemini, Claude o compatibile OpenAI) e premi *Elenca modelli* per scegliere il modello. Le chiavi vengono salvate in `~/.tone-builder/settings.yaml`, fuori dal repository. In alternativa usa le variabili d'ambiente `GEMINI_API_KEY`, `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`.
-2. **Helix Stadium** (una volta sola): esporta dall'app Helix Stadium alcuni tuoi preset `.hsp` (meglio un'intera setlist) e caricali. Il primo file diventa il "telaio" dei preset generati, gli altri insegnano al programma i blocchi disponibili.
+2. **Helix Stadium** (una volta sola): con lo Stadium acceso e sulla stessa rete del computer premi *Importa tutto dallo Stadium*. L'app legge in rete tutti i tuoi preset (e, se vuoi, quelli di fabbrica) senza toccare il preset attivo, e li usa per imparare i blocchi disponibili; il primo dei tuoi preset diventa il "telaio" di quelli generati. In alternativa carica a mano dei file `.hsp` esportati dall'app. Su macOS, la prima volta, consenti l'accesso alla rete locale (Impostazioni di sistema > Privacy e sicurezza > Rete locale).
 3. **Quad Cortex** (una volta sola): collega il QC via USB, **chiudi Cortex Control** e premi *Leggi catalogo*. Serve per conoscere i range dei parametri e le tue Neural Capture.
 4. **Cartelle** (facoltativo): dove tieni gli IR `.wav` e i preset scaricati (`.hlx`, `.hsp`).
 

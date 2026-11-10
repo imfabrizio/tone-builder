@@ -40,7 +40,7 @@ jobs:
         run: >
           pyinstaller --noconfirm --onefile --name ToneBuilder
           --add-binary "hidapi.dll;."
-          --collect-all helixgen --collect-all pyquadcortex
+          --collect-all helixgen --collect-all pyquadcortex --collect-all zmq --hidden-import msgpack
           --collect-data tonebuilder --collect-submodules tonebuilder
           --collect-submodules uvicorn --hidden-import yt_dlp --collect-all yt_dlp_ejs
           --exclude-module demucs --exclude-module torch

@@ -277,3 +277,82 @@ def read_hsp(path: str | Path) -> dict[str, Any]:
     if r.returncode != 0:
         raise HelixError(r.stderr.strip())
     return json.loads(r.stdout)
+
+
+# ---------------------------------------------------------------- import dallo Stadium in rete
+
+def _records(stdout: str) -> list[dict[str, Any]]:
+    data = json.loads(stdout or "[]")
+    if isinstance(data, dict):
+        data = next((v for v in data.values() if isinstance(v, list)), [])
+    return [r for r in data if isinstance(r, dict)]
+
+
+def stadium_import(include_factory: bool = True, ip: str = "",
+                   progress=None, out_root: str | Path | None = None) -> dict[str, Any]:
+    """Legge i preset dallo Stadium in rete (sola lettura, non cambia il preset attivo),
+    li converte in .hsp e li importa nella libreria helixgen.
+
+    Richiede helixgen[device]. Lo Stadium deve essere acceso e sulla stessa rete.
+    """
+    from datetime import datetime
+
+    from ..config import app_home
+
+    def say(n: int, tot: int, text: str) -> None:
+        if progress:
+            progress(n, tot, text)
+
+    ipargs = ["--ip", ip.strip()] if ip.strip() else []
+    say(0, 0, "Cerco lo Stadium in rete…")
+    if not ipargs:
+        r = _run(["device", "info"])
+        if r.returncode != 0:
+            d = _run(["device", "discover"])
+            if d.returncode != 0:
+                raise HelixError(
+                    "Helix Stadium non trovato in rete. Controlla che sia acceso e collegato alla stessa rete "
+                    "del computer (Wi-Fi o cavo); in alternativa indica il suo indirizzo IP. "
+                    + (d.stderr or d.stdout).strip()[-300:]
+                )
+    else:
+        r = _run(["device", "info", *ipargs])
+        if r.returncode != 0:
+            raise HelixError(f"Lo Stadium all'indirizzo {ip} non risponde: {(r.stderr or r.stdout).strip()[-300:]}")
+
+    sources = ["user"] + (["factory"] if include_factory else [])
+    todo: list[tuple[str, dict]] = []
+    for src in sources:
+        say(0, 0, f"Leggo l'elenco dei preset ({'tuoi' if src == 'user' else 'di fabbrica'})…")
+        r = _run(["device", "list", "--setlist", src, "--json", *ipargs])
+        if r.returncode != 0:
+            if src == "user":
+                raise HelixError(f"Elenco preset non riuscito: {(r.stderr or r.stdout).strip()[-300:]}")
+            continue
+        todo += [(src, rec) for rec in _records(r.stdout) if rec.get("cid_") is not None]
+
+    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    out = Path(out_root) if out_root else app_home() / "stadium_import" / stamp
+    out.mkdir(parents=True, exist_ok=True)
+    ok, failed = 0, []
+    for n, (src, rec) in enumerate(todo, 1):
+        name = str(rec.get("name") or rec["cid_"])
+        say(n, len(todo), f"{name}")
+        safe = re.sub(r"[^\w\- ]+", "_", name).strip() or str(rec["cid_"])
+        dest = out / src / f"{n:03d}_{safe}.hsp"
+        dest.parent.mkdir(exist_ok=True)
+        r = _run(["device", "to-hsp", str(rec["cid_"]), "-o", str(dest), "--no-verify", *ipargs])
+        if r.returncode == 0 and dest.exists():
+            ok += 1
+        else:
+            failed.append(f"{name}: {(r.stderr or r.stdout).strip().splitlines()[-1:] or ['errore']}")
+    if not ok:
+        raise HelixError("Nessun preset letto dallo Stadium. " + "; ".join(failed[:3]))
+
+    say(len(todo), len(todo), "Importo nella libreria…")
+    # i tuoi preset per primi: il primo file importato fa da telaio
+    msg = ingest(out / "user") if (out / "user").exists() else ""
+    if (out / "factory").exists():
+        msg += "\n" + ingest(out / "factory")
+    status = library_status()
+    return {"converted": ok, "failed": failed, "folder": str(out), "message": msg.strip(), **status}

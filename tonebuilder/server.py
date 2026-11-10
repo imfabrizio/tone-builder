@@ -149,6 +149,43 @@ async def helix_ingest(files: list[UploadFile] = File(default=[]), path: str = F
         _err(e)
 
 
+_stadium_job: dict[str, Any] = {"running": False}
+
+
+class StadiumImportIn(BaseModel):
+    include_factory: bool = True
+    ip: str = ""
+
+
+@app.post("/api/helix/stadium-import")
+def stadium_import_start(body: StadiumImportIn) -> dict:
+    """Avvia in background la lettura dei preset dallo Stadium in rete."""
+    if _stadium_job.get("running"):
+        return _stadium_job
+    _stadium_job.clear()
+    _stadium_job.update({"running": True, "done": 0, "total": 0, "current": "Avvio…", "error": None, "result": None})
+
+    def progress(n: int, tot: int, text: str) -> None:
+        _stadium_job.update({"done": n, "total": tot, "current": text})
+
+    def work() -> None:
+        try:
+            _stadium_job["result"] = hx.stadium_import(body.include_factory, body.ip, progress)
+        except Exception as e:
+            print(f"[errore] {e}", flush=True)
+            _stadium_job["error"] = str(e)
+        finally:
+            _stadium_job["running"] = False
+
+    threading.Thread(target=work, daemon=True).start()
+    return _stadium_job
+
+
+@app.get("/api/helix/stadium-import")
+def stadium_import_status() -> dict:
+    return _stadium_job
+
+
 @app.post("/api/helix/register-irs")
 def helix_register_irs(body: PathsIn) -> dict:
     try:

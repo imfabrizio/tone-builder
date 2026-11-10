@@ -153,6 +153,14 @@
       <legend>Helix Stadium</legend>
       <p class="hint" id="helixLibStatus"></p>
       <p class="hint">Serve una volta sola: esporta dall'app Helix Stadium alcuni tuoi preset (.hsp) e caricali qui. Il primo diventa il telaio dei preset generati.</p>
+      <p class="hint">Il modo più rapido: leggo tutti i preset direttamente dallo Stadium in rete (solo lettura, il preset attivo non cambia). Stadium acceso e sulla stessa rete del computer.</p>
+      <div class="row">
+        <div class="field" style="flex:1"><label for="stadiumIp">Indirizzo IP dello Stadium (facoltativo)</label><input id="stadiumIp" placeholder="Lo cerco da solo"></div>
+        <button type="button" class="btn primary" id="stadiumImportBtn">Importa tutto dallo Stadium</button>
+      </div>
+      <label class="check"><input type="checkbox" id="stadiumFactory" checked> Includi i preset di fabbrica (più blocchi disponibili)</label>
+      <p class="hint" id="stadiumProgress"></p>
+      <p class="hint">In alternativa carica i file .hsp esportati dall'app:</p>
       <label class="btn">Carica export .hsp<input type="file" id="ingestFiles" accept=".hsp" multiple hidden></label>
       <div class="field"><label for="helixOut">Cartella dove salvare i .hsp</label><input id="helixOut"></div>
     </fieldset>

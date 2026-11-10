@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 
 import pytest
 from helixgen.spec import parse_spec
@@ -180,3 +181,29 @@ def test_helix_uses_only_library_blocks(recipe):
     assert "Agoura_AmpBritPlexi" in used  # 2203 sostituito con l'ampli disponibile
     assert any("tolto" in w for w in b.warnings)  # cab/delay/reverb assenti dagli export
     parse_spec(b.spec)
+
+
+def test_stadium_import_flow(tmp_path, monkeypatch):
+    calls = []
+
+    def fake_run(args):
+        calls.append(args)
+        if args[:2] == ["device", "list"]:
+            src = args[args.index("--setlist") + 1]
+            recs = [{"cid_": 1, "name": "Clean"}, {"cid_": 2, "name": "Lead"}] if src == "user" else [{"cid_": 9, "name": "Factory"}]
+            return hx._Result(0, json.dumps(recs), "")
+        if args[:2] == ["device", "to-hsp"]:
+            out = Path(args[args.index("-o") + 1])
+            if args[2] == "2":
+                return hx._Result(1, "", "read failed")
+            out.write_text("{}")
+        return hx._Result(0, "", "")
+
+    ingested = []
+    monkeypatch.setattr(hx, "_run", fake_run)
+    monkeypatch.setattr(hx, "ingest", lambda p: ingested.append(Path(p).name) or "ok")
+    monkeypatch.setattr(hx, "library_status", lambda: {"ready": True, "blocks_in_library": 42})
+    res = hx.stadium_import(True, "", out_root=tmp_path)
+    assert res["converted"] == 2 and len(res["failed"]) == 1
+    assert ingested == ["user", "factory"]  # i preset dell'utente per primi: fanno da telaio
+    assert ["device", "info"] in calls

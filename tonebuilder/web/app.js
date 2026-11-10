@@ -838,6 +838,32 @@ function bindAll() {
     } catch {}
     e.target.value = "";
   });
+  $("#stadiumImportBtn").addEventListener("click", async () => {
+    const btn = $("#stadiumImportBtn");
+    const out = $("#stadiumProgress");
+    try {
+      await api("POST", "/api/helix/stadium-import", { include_factory: $("#stadiumFactory").checked, ip: $("#stadiumIp").value.trim() });
+    } catch (e) { toast(e.message, true); return; }
+    btn.disabled = true;
+    const poll = async () => {
+      let j;
+      try { j = await api("GET", "/api/helix/stadium-import"); } catch (e) { out.textContent = e.message; btn.disabled = false; return; }
+      if (j.running) {
+        out.textContent = j.total ? `Leggo i preset: ${j.done} di ${j.total} — ${j.current}` : j.current;
+        setTimeout(poll, 1200);
+        return;
+      }
+      btn.disabled = false;
+      if (j.error) { out.textContent = ""; toast(j.error, true); return; }
+      const r = j.result;
+      out.textContent = `Fatto: ${r.converted} preset letti, ${r.blocks_in_library} blocchi in libreria.` +
+        (r.failed.length ? ` ${r.failed.length} non letti.` : "");
+      toast("Libreria Helix pronta");
+      await loadStatus();
+      $("#helixLibStatus").textContent = `Libreria pronta: ${S.status.helix.blocks_in_library} blocchi dai tuoi export.`;
+    };
+    poll();
+  });
   $("#qcCatalogBtn").addEventListener("click", async () => {
     try {
       const r = await busy("Leggo il catalogo dal Quad Cortex…", () => api("POST", "/api/qc/read-catalog"));
