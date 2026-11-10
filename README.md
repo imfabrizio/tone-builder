@@ -22,13 +22,13 @@ cd tone-builder
 python -m venv .venv
 # Windows:  .venv\Scripts\activate
 # macOS:    source .venv/bin/activate
-pip install -e ".[all]"
+python -m pip install -e ".[all]"
 ```
 
 Facoltativi, per l'analisi audio:
 
 ```bash
-pip install -e ".[audio]"   # yt-dlp, demucs, librosa (Demucs scarica il modello al primo uso)
+python -m pip install -e ".[audio]"   # yt-dlp, demucs, librosa (Demucs scarica il modello al primo uso)
 ```
 
 Avvio:
@@ -80,7 +80,7 @@ tests/                 test automatici (pytest)
 ## Sviluppo
 
 ```bash
-pip install -e ".[all,dev]"
+python -m pip install -e ".[all,dev]"
 pytest
 ```
 
