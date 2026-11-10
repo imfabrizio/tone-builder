@@ -87,6 +87,29 @@ def separate_guitar(audio: str | Path, out_dir: str | Path) -> Path:
     return max(hits, key=lambda p: p.stat().st_mtime)
 
 
+_NATIVE_FORMATS = {".wav", ".flac", ".mp3", ".ogg", ".aiff", ".aif"}
+
+
+def ensure_wav(audio: str | Path) -> Path:
+    """Converte in WAV i formati che librosa, Demucs e Gemini non leggono
+    (es. .webm/.m4a scaricati da YouTube). Serve ffmpeg."""
+    audio = Path(audio)
+    if audio.suffix.lower() in _NATIVE_FORMATS:
+        return audio
+    ff = shutil.which("ffmpeg")
+    if not ff:
+        raise RuntimeError(
+            f"Il formato {audio.suffix} va convertito ma ffmpeg non e' installato "
+            "(Windows: winget install Gyan.FFmpeg; Mac: brew install ffmpeg), poi riavvia l'app."
+        )
+    out = audio.with_suffix(".wav")
+    r = subprocess.run([ff, "-y", "-loglevel", "error", "-i", str(audio), "-vn", "-ac", "2", "-ar", "44100", str(out)],
+                       capture_output=True, text=True, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    if r.returncode != 0 or not out.exists():
+        raise RuntimeError(f"Conversione in WAV non riuscita: {r.stderr.strip()[-300:]}")
+    return out
+
+
 def features(audio: str | Path) -> dict:
     """Misure sintetiche della traccia (richiede librosa)."""
     import numpy as np

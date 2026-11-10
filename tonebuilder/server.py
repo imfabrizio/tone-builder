@@ -242,6 +242,10 @@ async def audio_analyze(file: UploadFile | None = File(default=None), url: str =
                               "audio_id": work.name if audio_path else None}
     if audio_path is None:
         return result
+    try:
+        audio_path = analysis.ensure_wav(audio_path)
+    except Exception as e:
+        notes.append(str(e))
     target = audio_path
     if separate:
         if analysis.demucs_available():
