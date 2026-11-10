@@ -19,6 +19,7 @@ Scarica **ToneBuilder.exe** dalla sezione [Releases](https://github.com/imfabriz
 - Non serve installare Python.
 - Al primo avvio Windows SmartScreen può mostrare "Windows ha protetto il PC", perché l'eseguibile non è firmato: *Ulteriori informazioni > Esegui comunque*.
 - L'eseguibile si aggiorna da solo a ogni modifica del codice: riscarica il file per avere l'ultima versione.
+- Per i link YouTube serve un motore JavaScript installato sul PC (`winget install DenoLand.Deno`; va bene anche Node.js se ce l'hai già).
 - Non contiene Demucs (pesa troppo), ma lo usa se lo installi a parte: vedi *Separazione della chitarra*. Non include nemmeno le misure audio di librosa; l'analisi della traccia la fa comunque l'AI ascoltando l'audio (con Gemini).
 
 ## Installazione da sorgente (macOS, oppure Windows con Python)

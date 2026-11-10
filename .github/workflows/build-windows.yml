@@ -24,7 +24,7 @@ jobs:
       - name: Dipendenze
         run: |
           python -m pip install --upgrade pip
-          python -m pip install ".[all,dev]" pyinstaller yt-dlp
+          python -m pip install ".[all,dev]" pyinstaller "yt-dlp[default]"
 
       - name: Test
         run: python -m pytest -q
@@ -42,7 +42,7 @@ jobs:
           --add-binary "hidapi.dll;."
           --collect-all helixgen --collect-all pyquadcortex
           --collect-data tonebuilder --collect-submodules tonebuilder
-          --collect-submodules uvicorn --hidden-import yt_dlp
+          --collect-submodules uvicorn --hidden-import yt_dlp --collect-all yt_dlp_ejs
           --exclude-module demucs --exclude-module torch
           --exclude-module librosa --exclude-module numba
           packaging/launcher.py

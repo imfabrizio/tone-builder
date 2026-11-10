@@ -68,12 +68,21 @@ def is_url(text: str) -> bool:
     return bool(re.match(r"^https?://", text.strip()))
 
 
+def _ydl_opts(**extra) -> dict:
+    """YouTube richiede un motore JavaScript: abilitiamo tutti quelli supportati
+    (deno, node, bun, quickjs) cosi' yt-dlp usa quello che trova installato."""
+    opts = {"quiet": True, "noplaylist": True,
+            "js_runtimes": {"deno": {}, "node": {}, "bun": {}, "quickjs": {}}}
+    opts.update(extra)
+    return opts
+
+
 def from_url(url: str) -> TrackInfo:
     try:
         import yt_dlp
     except ImportError as e:
         raise RuntimeError("Per i link serve yt-dlp: pip install yt-dlp") from e
-    with yt_dlp.YoutubeDL({"quiet": True, "skip_download": True, "noplaylist": True}) as ydl:
+    with yt_dlp.YoutubeDL(_ydl_opts(skip_download=True)) as ydl:
         d = ydl.extract_info(url, download=False)
     info = TrackInfo(
         title=d.get("track") or "",
@@ -95,10 +104,7 @@ def download_audio(url: str, dest_dir: str | Path) -> Path:
 
     dest_dir = Path(dest_dir)
     dest_dir.mkdir(parents=True, exist_ok=True)
-    opts = {
-        "quiet": True, "noplaylist": True, "format": "bestaudio/best",
-        "outtmpl": str(dest_dir / "%(id)s.%(ext)s"),
-    }
+    opts = _ydl_opts(format="bestaudio/best", outtmpl=str(dest_dir / "%(id)s.%(ext)s"))
     with yt_dlp.YoutubeDL(opts) as ydl:
         d = ydl.extract_info(url, download=True)
         return Path(ydl.prepare_filename(d))
