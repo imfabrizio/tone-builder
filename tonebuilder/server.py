@@ -47,6 +47,8 @@ def _safe_name(name: str) -> str:
 
 
 def _err(e: Exception, status: int = 400):
+    # l'errore compare anche nella finestra del server, utile se l'interfaccia lo nasconde
+    print(f"[errore] {e}", flush=True)
     raise HTTPException(status_code=status, detail=str(e))
 
 

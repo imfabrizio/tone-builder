@@ -46,8 +46,16 @@ async function api(method, path, body) {
   return data;
 }
 
+/* Un <dialog> modale sta sopra a tutto il resto della pagina: messaggi e
+   attesa vanno spostati dentro il dialogo aperto, altrimenti finiscono sotto. */
+function topHost() {
+  return $("dialog[open]") || document.body;
+}
+
 function toast(msg, bad = false) {
   const t = $("#toast");
+  const host = topHost();
+  if (t.parentElement !== host) host.appendChild(t);
   t.textContent = msg;
   t.classList.toggle("bad", bad);
   t.classList.add("show");
@@ -57,6 +65,8 @@ function toast(msg, bad = false) {
 
 async function busy(text, fn) {
   $("#busyText").textContent = text;
+  const host = topHost();
+  if ($("#busy").parentElement !== host) host.appendChild($("#busy"));
   $("#busy").classList.remove("hidden");
   try { return await fn(); }
   catch (e) { toast(e.message, true); throw e; }
