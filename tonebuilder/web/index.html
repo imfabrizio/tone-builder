@@ -1,0 +1,219 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tone Builder</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,400..800&display=swap">
+<link rel="stylesheet" href="/static/styles.css">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 16 16%27%3E%3Ccircle cx=%278%27 cy=%278%27 r=%277%27 fill=%27%23f2a93b%27/%3E%3C/svg%3E">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand"><span class="lamp" aria-hidden="true"></span>Tone Builder</div>
+  <div class="top-status" id="topStatus"></div>
+  <button class="btn ghost" id="openSettings">Impostazioni</button>
+</header>
+
+<div class="layout">
+  <!-- scaletta -->
+  <aside class="rail" aria-label="Scaletta">
+    <div class="rail-head">
+      <select id="setlistSelect" aria-label="Scaletta"></select>
+      <button class="btn icon" id="newSetlist" title="Nuova scaletta" aria-label="Nuova scaletta">+</button>
+    </div>
+    <ol class="songs" id="songList"></ol>
+    <button class="btn wide" id="addSong">Aggiungi brano</button>
+    <button class="btn wide ghost" id="openMerge">Unisci suoni da più preset</button>
+  </aside>
+
+  <!-- area di lavoro -->
+  <main class="work" id="work">
+    <section class="empty" id="emptyState">
+      <h1>Dalla canzone al preset</h1>
+      <p>Aggiungi un brano alla scaletta, descrivi il suono o carica la traccia: Tone Builder prepara la patch per Helix Stadium e Quad Cortex, con gli snapshot già impostati.</p>
+      <button class="btn primary" id="emptyAdd">Aggiungi il primo brano</button>
+    </section>
+
+    <section class="song hidden" id="songView">
+      <div class="song-head">
+        <input class="title-input" id="songTitle" placeholder="Titolo del brano" aria-label="Titolo del brano">
+        <input class="artist-input" id="songArtist" placeholder="Artista" aria-label="Artista">
+        <div class="tabs" role="tablist">
+          <button role="tab" class="tab active" data-tab="design">Progetta</button>
+          <button role="tab" class="tab" data-tab="preset">Preset</button>
+        </div>
+      </div>
+
+      <!-- progetta -->
+      <div class="tabpanel" id="tab-design">
+        <div class="design-grid">
+          <div class="field span2">
+            <label for="reqDescription">Che suono vuoi</label>
+            <textarea id="reqDescription" rows="3" placeholder="Es. crunch Marshall anni '80 con un po' di chorus, assolo più saturo con delay"></textarea>
+          </div>
+          <div class="field">
+            <label for="reqGuitar">Chitarra che userai</label>
+            <input id="reqGuitar" placeholder="Es. Strat SSS, Les Paul con humbucker">
+          </div>
+          <div class="field">
+            <label for="reqPrefs">Preferenze</label>
+            <input id="reqPrefs" placeholder="Es. niente fuzz, preferisco ampli Fender">
+          </div>
+          <div class="field span2">
+            <label for="reqSnapshots">Snapshot che ti servono</label>
+            <textarea id="reqSnapshots" rows="2" placeholder="Es. Intro pulito, Strofa crunch, Ritornello crunch più aperto, Assolo lead con delay"></textarea>
+          </div>
+        </div>
+
+        <div class="audio-box">
+          <div class="audio-inputs">
+            <label class="drop" id="dropZone" tabindex="0">
+              <input type="file" id="audioFile" accept="audio/*" hidden>
+              <span>Trascina qui l'MP3 o <u>scegli un file</u></span>
+            </label>
+            <div class="or">oppure</div>
+            <input id="audioUrl" placeholder="Link YouTube o altra pagina">
+            <label class="check"><input type="checkbox" id="audioDownload"> Scarica l'audio dal link (uso personale)</label>
+          </div>
+          <button class="btn" id="analyzeBtn">Analizza la traccia</button>
+          <div class="analysis hidden" id="analysisBox"></div>
+        </div>
+
+        <div class="actions">
+          <button class="btn primary big" id="designBtn">Crea il preset</button>
+          <span class="hint" id="designHint"></span>
+        </div>
+      </div>
+
+      <!-- preset -->
+      <div class="tabpanel hidden" id="tab-preset">
+        <div class="no-preset" id="noPreset">Nessun preset ancora: compila "Progetta" e premi Crea il preset, oppure importa un file.</div>
+        <div id="presetBody" class="hidden">
+          <div class="preset-top">
+            <input class="preset-name" id="presetName" aria-label="Nome del preset">
+            <div class="meters" id="meters"></div>
+          </div>
+
+          <div class="board" id="board" aria-label="Catena del segnale"></div>
+          <div class="block-editor hidden" id="blockEditor"></div>
+
+          <h2 class="sec">Snapshot</h2>
+          <div class="matrix-wrap"><table class="matrix" id="matrix"></table></div>
+          <p class="hint">Clicca una casella per accendere o spegnere il blocco in quello snapshot. Clicca il nome dello snapshot per i valori dedicati.</p>
+          <div class="snap-editor hidden" id="snapEditor"></div>
+
+          <h2 class="sec">Note per il chitarrista</h2>
+          <ul class="notes" id="notes"></ul>
+
+          <div class="device-actions">
+            <button class="btn primary" id="helixBtn">Crea il file per Helix Stadium</button>
+            <button class="btn primary" id="qcBtn">Scrivi sul Quad Cortex</button>
+            <button class="btn ghost" id="exportJson">Salva la ricetta (.json)</button>
+            <label class="btn ghost">Importa preset<input type="file" id="importFile" accept=".hlx,.hsp,.json" hidden></label>
+          </div>
+          <div id="deviceResult"></div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- assistente -->
+  <aside class="assist" aria-label="Assistente">
+    <h2 class="sec">Modifica a parole</h2>
+    <div class="chat" id="chat"></div>
+    <form class="chat-form" id="chatForm">
+      <textarea id="chatInput" rows="2" placeholder="Es. più gain nell'assolo, metti il delay sul footswitch 4"></textarea>
+      <button class="btn primary" type="submit">Applica</button>
+    </form>
+    <details class="research" id="researchBox">
+      <summary>Ricerca e fonti</summary>
+      <div id="researchText"></div>
+      <ul class="links" id="sourceLinks"></ul>
+    </details>
+    <details class="research" id="warnBox">
+      <summary>Avvisi</summary>
+      <ul class="warn" id="warnings"></ul>
+    </details>
+  </aside>
+</div>
+
+<!-- dialoghi -->
+<dialog id="settingsDlg" class="dlg">
+  <form method="dialog" class="dlg-body" id="settingsForm">
+    <h2>Impostazioni</h2>
+    <fieldset>
+      <legend>Intelligenza artificiale</legend>
+      <div class="seg" id="providerSeg"></div>
+      <div id="providerFields"></div>
+      <label class="check"><input type="checkbox" id="webResearch"> Cerca sul web strumentazione, preset e IR gratuiti</label>
+    </fieldset>
+    <fieldset>
+      <legend>Helix Stadium</legend>
+      <p class="hint" id="helixLibStatus"></p>
+      <p class="hint">Serve una volta sola: esporta dall'app Helix Stadium alcuni tuoi preset (.hsp) e caricali qui. Il primo diventa il telaio dei preset generati.</p>
+      <label class="btn">Carica export .hsp<input type="file" id="ingestFiles" accept=".hsp" multiple hidden></label>
+      <div class="field"><label for="helixOut">Cartella dove salvare i .hsp</label><input id="helixOut"></div>
+    </fieldset>
+    <fieldset>
+      <legend>Quad Cortex</legend>
+      <p class="hint" id="qcStatus"></p>
+      <p class="hint">Collega il QC via USB e chiudi Cortex Control, poi leggi il catalogo: servono i range dei parametri.</p>
+      <button type="button" class="btn" id="qcCatalogBtn">Leggi catalogo dal Quad Cortex</button>
+      <div class="field"><label for="qcSlot">Primo slot libero da usare</label><input id="qcSlot" placeholder="Es. 30A"></div>
+    </fieldset>
+    <fieldset>
+      <legend>Cartelle</legend>
+      <div class="field"><label for="irFolders">Cartelle con IR (.wav), una per riga</label><textarea id="irFolders" rows="2"></textarea></div>
+      <div class="field"><label for="presetFolders">Cartelle con preset scaricati (.hlx, .hsp), una per riga</label><textarea id="presetFolders" rows="2"></textarea></div>
+    </fieldset>
+    <div class="dlg-actions">
+      <button value="cancel" class="btn ghost">Chiudi</button>
+      <button type="button" class="btn primary" id="saveSettings">Salva</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="qcDlg" class="dlg">
+  <div class="dlg-body">
+    <h2>Scrivi sul Quad Cortex</h2>
+    <div class="field"><label for="qcSlotRun">Slot di destinazione</label><input id="qcSlotRun" placeholder="Es. 30A"></div>
+    <button class="btn" id="qcPlanBtn">Mostra cosa verrà fatto</button>
+    <div id="qcPlan"></div>
+    <label class="check"><input type="checkbox" id="qcConfirm"> Ho capito che lo slot verrà sovrascritto e che Cortex Control è chiuso</label>
+    <div class="dlg-actions">
+      <button class="btn ghost" id="qcClose">Chiudi</button>
+      <button class="btn ghost hidden" id="qcBypassBtn">Applica on/off per scena</button>
+      <button class="btn primary" id="qcRunBtn" disabled>Scrivi sul Quad Cortex</button>
+    </div>
+  </div>
+</dialog>
+
+<dialog id="mergeDlg" class="dlg wide">
+  <div class="dlg-body">
+    <h2>Unisci suoni da più preset</h2>
+    <p class="hint">Scegli da quali preset prendere ogni suono: ognuno diventa uno snapshot. Ampli della stessa famiglia vengono unificati in uno solo; se il DSP non basta ti propongo dei compromessi da confermare.</p>
+    <div class="merge-sources">
+      <label class="btn">Importa preset<input type="file" id="mergeImport" accept=".hlx,.hsp,.json" multiple hidden></label>
+      <select id="mergeFromSong" aria-label="Aggiungi da un brano"><option value="">Aggiungi da un brano della scaletta…</option></select>
+      <input id="localSearch" placeholder="Cerca nelle tue cartelle preset">
+    </div>
+    <ul class="local-results" id="localResults"></ul>
+    <table class="picks" id="picks"></table>
+    <div class="field"><label for="mergeName">Nome del preset finale</label><input id="mergeName" value="Preset unito"></div>
+    <button class="btn primary" id="mergeRun">Unisci</button>
+    <div id="mergeResult"></div>
+    <div class="dlg-actions">
+      <button class="btn ghost" id="mergeClose">Chiudi</button>
+      <button class="btn primary hidden" id="mergeUse">Usa per il brano selezionato</button>
+    </div>
+  </div>
+</dialog>
+
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+<div class="busy hidden" id="busy"><div class="busy-card"><span class="spinner"></span><span id="busyText">Lavoro in corso…</span></div></div>
+
+<script src="/static/app.js"></script>
+</body>
+</html>
