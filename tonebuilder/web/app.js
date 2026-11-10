@@ -644,6 +644,10 @@ function openSettings() {
   $("#qcSlot").value = st.qc_target_setlist_slot || "";
   $("#irFolders").value = (st.ir_folders || []).join("\n");
   $("#presetFolders").value = (st.preset_folders || []).join("\n");
+  $("#demucsCmd").value = st.demucs_command || "";
+  $("#demucsStatus").textContent = S.status.optional.demucs
+    ? "Demucs trovato: la chitarra viene isolata prima dell'analisi."
+    : "Demucs non trovato: l'analisi usa il mix completo. Le istruzioni per installarlo sono nel README, sezione Separazione della chitarra.";
   $("#helixLibStatus").textContent = S.status.helix.ready
     ? `Libreria pronta: ${S.status.helix.blocks_in_library} blocchi dai tuoi export.` : "Libreria vuota: carica almeno un export .hsp.";
   $("#qcStatus").textContent = S.status.qc.catalog_from_device
@@ -679,6 +683,7 @@ async function saveSettings() {
     qc_target_setlist_slot: $("#qcSlot").value.trim(),
     ir_folders: $("#irFolders").value.split("\n").map((x) => x.trim()).filter(Boolean),
     preset_folders: $("#presetFolders").value.split("\n").map((x) => x.trim()).filter(Boolean),
+    demucs_command: $("#demucsCmd").value.trim(),
   };
   await busy("Salvo…", () => api("PUT", "/api/settings", body));
   await loadStatus();

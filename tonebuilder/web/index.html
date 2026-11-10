@@ -168,6 +168,11 @@
       <div class="field"><label for="irFolders">Cartelle con IR (.wav), una per riga</label><textarea id="irFolders" rows="2"></textarea></div>
       <div class="field"><label for="presetFolders">Cartelle con preset scaricati (.hlx, .hsp), una per riga</label><textarea id="presetFolders" rows="2"></textarea></div>
     </fieldset>
+    <fieldset>
+      <legend>Separazione della chitarra</legend>
+      <p class="hint" id="demucsStatus"></p>
+      <div class="field"><label for="demucsCmd">Percorso di demucs.exe (solo se non viene trovato da solo)</label><input id="demucsCmd" placeholder="Es. C:\Users\nome\.local\bin\demucs.exe"></div>
+    </fieldset>
     <div class="dlg-actions">
       <button value="cancel" class="btn ghost">Chiudi</button>
       <button type="button" class="btn primary" id="saveSettings">Salva</button>

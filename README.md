@@ -19,7 +19,7 @@ Scarica **ToneBuilder.exe** dalla sezione [Releases](https://github.com/imfabriz
 - Non serve installare Python.
 - Al primo avvio Windows SmartScreen può mostrare "Windows ha protetto il PC", perché l'eseguibile non è firmato: *Ulteriori informazioni > Esegui comunque*.
 - L'eseguibile si aggiorna da solo a ogni modifica del codice: riscarica il file per avere l'ultima versione.
-- Non include la separazione della chitarra (Demucs, troppo pesante) né le misure audio di librosa: l'analisi della traccia la fa l'AI ascoltando il mix completo (con Gemini).
+- Non contiene Demucs (pesa troppo), ma lo usa se lo installi a parte: vedi *Separazione della chitarra*. Non include nemmeno le misure audio di librosa; l'analisi della traccia la fa comunque l'AI ascoltando l'audio (con Gemini).
 
 ## Installazione da sorgente (macOS, oppure Windows con Python)
 
@@ -47,6 +47,31 @@ python -m tonebuilder
 ```
 
 Si apre il browser su `http://127.0.0.1:8765`. L'app ascolta solo sul tuo computer. Su Windows puoi anche fare doppio clic su `avvia.bat`, su Mac su `avvia.command`.
+
+## Separazione della chitarra (Demucs)
+
+Demucs isola la chitarra dal mix prima dell'analisi. È facoltativo e pesante (porta con sé PyTorch, 1-2 GB), quindi si installa a parte; l'app lo trova da sola.
+
+**Windows (con l'eseguibile)**, una volta sola, da PowerShell:
+
+```powershell
+winget install Python.Python.3.12
+winget install Gyan.FFmpeg
+py -3.12 -m pip install --user pipx
+py -3.12 -m pipx install demucs
+py -3.12 -m pipx ensurepath
+```
+
+Chiudi e riapri ToneBuilder: in *Impostazioni > Separazione della chitarra* deve comparire "Demucs trovato". Se non lo trova, indica lì il percorso di `demucs.exe` (di solito `C:\Users\<nome>\.local\bin\demucs.exe`).
+
+**macOS / da sorgente**, con il venv attivo:
+
+```bash
+python -m pip install demucs
+brew install ffmpeg
+```
+
+Al primo utilizzo Demucs scarica il modello (circa 80 MB). La separazione di un brano richiede da uno a qualche minuto, a seconda del computer.
 
 ## Prima configurazione
 

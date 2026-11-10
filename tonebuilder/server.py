@@ -89,6 +89,7 @@ class SettingsIn(BaseModel):
     preset_folders: list[str] | None = None
     helix_output_dir: str | None = None
     qc_target_setlist_slot: str | None = None
+    demucs_command: str | None = None
 
 
 @app.put("/api/settings")
@@ -104,11 +105,13 @@ def update_settings(body: SettingsIn) -> dict[str, Any]:
         if vals.get("api_key"):  # campo vuoto = lascia la chiave esistente
             cur.api_key = vals["api_key"].strip()
         s.providers[name] = cur
-    for k in ("web_research", "ir_folders", "preset_folders", "helix_output_dir", "qc_target_setlist_slot"):
+    for k in ("web_research", "ir_folders", "preset_folders", "helix_output_dir", "qc_target_setlist_slot", "demucs_command"):
         v = getattr(body, k)
         if v is not None:
             setattr(s, k, v)
     save_settings(s)
+    if body.demucs_command is not None:
+        analysis.demucs_command(refresh=True)
     return public_view(s)
 
 
@@ -246,7 +249,7 @@ async def audio_analyze(file: UploadFile | None = File(default=None), url: str =
             except Exception as e:
                 notes.append(f"Separazione non riuscita, uso il mix completo: {e}")
         else:
-            notes.append("Demucs non installato: analizzo il mix completo (pip install demucs).")
+            notes.append(analysis.DEMUCS_HELP)
     (work / "target.txt").write_text(str(target), encoding="utf-8")
     ftxt = ""
     if _has("librosa"):

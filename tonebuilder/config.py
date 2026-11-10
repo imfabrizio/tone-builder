@@ -39,6 +39,7 @@ class Settings(BaseModel):
     preset_folders: list[str] = Field(default_factory=list)  # cartelle con .hlx/.hsp scaricati
     helix_output_dir: str = ""  # dove salvare i .hsp generati
     qc_target_setlist_slot: str = ""  # es. "30A": primo slot libero da usare sul QC
+    demucs_command: str = ""  # facoltativo: percorso di demucs.exe o del python che lo contiene
     language: str = "it"
 
     def active(self) -> ProviderSettings:
