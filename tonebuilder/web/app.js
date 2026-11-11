@@ -650,6 +650,30 @@ function renderAssist() {
   $("#warnBox").querySelector("summary").textContent = w.length ? `Avvisi (${w.length})` : "Avvisi";
 }
 
+/* Indicatore "sta lavorando" dentro una chat: puntini animati e secondi trascorsi.
+   Ritorna una funzione che lo toglie. Disattiva i pulsanti passati finche' lavora. */
+function working(chatEl, label, buttons = []) {
+  const el = document.createElement("div");
+  el.className = "msg ai pending";
+  el.setAttribute("role", "status");
+  el.innerHTML = `<span class="dots" aria-hidden="true"><i></i><i></i><i></i></span> <span class="lbl"></span>`;
+  chatEl.appendChild(el);
+  chatEl.scrollTop = chatEl.scrollHeight;
+  const t0 = Date.now();
+  const tick = () => {
+    const sec = Math.round((Date.now() - t0) / 1000);
+    el.querySelector(".lbl").textContent = `${label}${sec >= 3 ? ` (${sec} s)` : ""}`;
+  };
+  tick();
+  const timer = setInterval(tick, 1000);
+  buttons.forEach((b) => b && (b.disabled = true));
+  return () => {
+    clearInterval(timer);
+    el.remove();
+    buttons.forEach((b) => b && (b.disabled = false));
+  };
+}
+
 /* dialogo: risposta dell'AI ed esecuzione dopo l'ok */
 async function dialogTurn(text) {
   const log = chatLog();
@@ -657,14 +681,17 @@ async function dialogTurn(text) {
   renderAssist();
   saveSoon();
   let res;
+  const stop = working($("#chat"), "Ci penso…", [$("#chatSend")]);
   try {
     res = await api("POST", "/api/dialog", { setlist_id: S.setlist.id, current: S.songIdx >= 0 ? S.songIdx : null,
       history: log.filter((m) => !m.err).map(({ who, text }) => ({ who, text })) });
   } catch (err) {
+    stop();
     log.push({ who: "ai", text: err.message, err: true });
     renderAssist();
     return "";
   }
+  stop();
   log.push({ who: "ai", text: res.reply });
   renderAssist();
   saveSoon();
@@ -677,7 +704,10 @@ async function executeAction(action) {
   let res;
   try {
     await saveNow();
-    res = await busy("Lo faccio…", () => api("POST", "/api/dialog/execute", { setlist_id: S.setlist.id, action }));
+    const label = { design_song: "Creo il preset… (circa un minuto)", edit_song: "Modifico il preset…",
+      generic_patches: "Preparo le patch generiche…", analyze_youtube: "Avvio l'ascolto dei brani…",
+      design_all: "Avvio la creazione dei preset…" }[action.type] || "Lo faccio…";
+    res = await busy(label, () => api("POST", "/api/dialog/execute", { setlist_id: S.setlist.id, action }));
   } catch (err) {
     log.push({ who: "ai", text: err.message, err: true });
     renderAssist();
@@ -730,7 +760,9 @@ async function sendChat(e) {
   $("#chatInput").value = "";
   renderAssist();
   try {
-    const res = await busy("Applico la modifica…", () => api("POST", "/api/edit", { recipe: s.recipe, instruction: text }));
+    const stop = working($("#chat"), "Applico la modifica…", [$("#chatSend")]);
+    let res;
+    try { res = await api("POST", "/api/edit", { recipe: s.recipe, instruction: text }); } finally { stop(); }
     s.recipe = res.recipe;
     s.warnings = res.warnings || [];
     s.chat.push({ who: "ai", text: res.reply || "Modifica applicata." });
@@ -986,9 +1018,12 @@ async function reduceTurn(text) {
   renderReduceChat();
   if (!S.reduceProposal) {  // primo messaggio: diventa l'indicazione per la proposta
     const notes = [$("#reduceNotes").value.trim(), text].filter(Boolean).join(". ");
+    const stopP = working($("#reduceChat"), "Raggruppo i brani…", [$("#reduceSend")]);
     try {
       await makeProposal(notes);
+      stopP();
     } catch (e) {
+      stopP();
       S.reduceChat.push({ who: "ai", text: e.message, err: true });
       renderReduceChat();
       return "";
@@ -1000,15 +1035,18 @@ async function reduceTurn(text) {
     return reply;
   }
   let res;
+  const stopR = working($("#reduceChat"), "Aggiorno la proposta…", [$("#reduceSend")]);
   try {
     res = await api("POST", `/api/setlists/${S.setlist.id}/group-revise`, {
       proposal: S.reduceProposal, max_patches: +$("#reduceMax").value || 4,
       history: S.reduceChat.filter((m) => !m.err).map(({ who, text }) => ({ who, text })) });
   } catch (e) {
+    stopR();
     S.reduceChat.push({ who: "ai", text: e.message, err: true });
     renderReduceChat();
     return "";
   }
+  stopR();
   S.reduceProposal = res.proposal;
   S.reduceChat.push({ who: "ai", text: res.reply });
   renderProposal();
