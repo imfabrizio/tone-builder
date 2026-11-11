@@ -233,12 +233,38 @@ def create_setlist(body: dict) -> dict:
     return data
 
 
+def clean_links(data: dict) -> dict:
+    """Toglie i collegamenti a patch che non esistono piu' (es. cancellate) e aggiorna i nomi."""
+    patches = {x.get("id"): x for x in data.get("songs", []) if x.get("kind") == "patch" and x.get("recipe")}
+    for x in data.get("songs", []):
+        if x.get("kind") == "patch":
+            continue
+        if x.get("uses_patch"):
+            p = patches.get(x["uses_patch"])
+            if p is None:
+                for k in ("uses_patch", "uses_patch_name", "patch_usage"):
+                    x.pop(k, None)
+            else:
+                x["uses_patch_name"] = p.get("title", "")
+        if x.get("suggested_patch"):
+            p = patches.get(x["suggested_patch"])
+            if p is None:
+                for k in ("suggested_patch", "suggested_patch_name", "suggested_usage"):
+                    x.pop(k, None)
+            else:
+                x["suggested_patch_name"] = p.get("title", "")
+    for p in patches.values():
+        p["covers"] = [f"{x.get('artist', '')} - {x.get('title', '')}" for x in data.get("songs", [])
+                       if x.get("uses_patch") == p.get("id")]
+    return data
+
+
 @app.get("/api/setlists/{sid}")
 def get_setlist(sid: str) -> dict:
     p = _setlist_path(sid)
     if not p.exists():
         _err(KeyError("scaletta non trovata"), 404)
-    return json.loads(p.read_text(encoding="utf-8"))
+    return clean_links(json.loads(p.read_text(encoding="utf-8")))
 
 
 @app.put("/api/setlists/{sid}")
@@ -246,6 +272,7 @@ def put_setlist(sid: str, body: dict) -> dict:
     for song in body.get("songs", []):
         if song.get("recipe"):
             ToneRecipe.model_validate(song["recipe"])  # niente ricette rotte su disco
+    clean_links(body)
     body["id"] = sid
     _setlist_path(sid).write_text(json.dumps(body, ensure_ascii=False, indent=1), encoding="utf-8")
     return body
@@ -537,6 +564,7 @@ def _load_sl(sid: str) -> dict:
 
 
 def _save_sl(data: dict) -> None:
+    clean_links(data)
     _setlist_path(data["id"]).write_text(json.dumps(data, ensure_ascii=False, indent=1), encoding="utf-8")
 
 
@@ -654,6 +682,9 @@ def start_generic(sid: str, proposal: dict) -> dict:
                         if x.get("uses_patch") in old_ids:
                             for k in ("uses_patch", "uses_patch_name", "patch_usage"):
                                 x.pop(k, None)
+                        if x.get("suggested_patch") in old_ids:
+                            for k in ("suggested_patch", "suggested_patch_name", "suggested_usage"):
+                                x.pop(k, None)
                     old_ids.clear()
                 pid = uuid.uuid4().hex[:8]
                 by_id = {x.get("id"): x for x in cur["songs"]}
@@ -662,14 +693,17 @@ def start_generic(sid: str, proposal: dict) -> dict:
                     song = by_id.get(song_id)
                     if song is None:
                         continue
-                    song.update({"uses_patch": pid, "uses_patch_name": g["name"], "patch_usage": r.get("usage", "")})
+                    # solo un suggerimento: l'assegnazione la decide il chitarrista
+                    song.update({"suggested_patch": pid, "suggested_patch_name": g["name"],
+                                 "suggested_usage": r.get("usage", "")})
                     covered.append(f"{song.get('artist', '')} - {song.get('title', '')}")
                 entry = {"id": pid, "kind": "patch", "title": g["name"], "artist": "Patch generica",
                          "request": {"description": g.get("description", ""), "snapshots": g.get("snapshots", ""),
                                      "guitar": g.get("guitar", "")},
-                         "covers": covered, "audio": None, "recipe": res.recipe.model_dump(), "research": "",
+                         "covers": [], "suggested_for": covered, "summary": planner.summarize_patch(res.recipe, g, prov),
+                         "audio": None, "recipe": res.recipe.model_dump(), "research": "",
                          "sources": [], "links": [], "warnings": res.warnings,
-                         "chat": [{"who": "ai", "text": f"Patch generica per {len(covered)} brani. Dimmi cosa ritoccare."}]}
+                         "chat": [{"who": "ai", "text": f"Patch generica pensata per {len(covered)} brani. Dimmi cosa ritoccare."}]}
                 first_song = next((i for i, x in enumerate(cur["songs"]) if x.get("kind") != "patch"), len(cur["songs"]))
                 cur["songs"].insert(first_song, entry)
                 _save_sl(cur)
@@ -750,7 +784,8 @@ def setlist_overview(sid: str) -> list[dict]:
     for i, x in enumerate(get_setlist(sid)["songs"]):
         r = x.get("recipe")
         row = {"index": i, "title": x.get("title", ""), "artist": x.get("artist", ""), "kind": x.get("kind", "song"),
-               "uses_patch_name": x.get("uses_patch_name", ""), "has_recipe": bool(r), "blocks": []}
+               "uses_patch_name": x.get("uses_patch_name", ""), "suggested_patch_name": x.get("suggested_patch_name", ""),
+               "has_recipe": bool(r), "blocks": []}
         if r:
             row["name"] = r.get("name", "")
             row["snapshots"] = [s.get("name", "") for s in r.get("snapshots", [])]
@@ -793,6 +828,30 @@ def setlist_helix_zip(sid: str):
     return Response(buf.getvalue(), media_type="application/zip",
                     headers={"Content-Disposition": f'attachment; filename="{name} - Helix.zip"',
                              "X-Created": str(done), "X-Problems": str(len(problems))})
+
+
+@app.post("/api/setlists/{sid}/assign")
+def assign_patches(sid: str, body: dict) -> dict:
+    """Assegna le patch ai brani. body: {"assignments": {song_id: patch_id | null}} oppure {"suggested": true}."""
+    data = get_setlist(sid)
+    patches = {x["id"]: x for x in data["songs"] if x.get("kind") == "patch" and x.get("recipe")}
+    if body.get("suggested"):
+        plan = {x["id"]: x.get("suggested_patch") for x in data["songs"]
+                if x.get("kind") != "patch" and x.get("suggested_patch") in patches}
+    else:
+        plan = body.get("assignments") or {}
+    for x in data["songs"]:
+        if x.get("kind") == "patch" or x.get("id") not in plan:
+            continue
+        pid = plan[x["id"]]
+        if pid and pid in patches:
+            x.update({"uses_patch": pid, "uses_patch_name": patches[pid].get("title", ""),
+                      "patch_usage": x.get("suggested_usage", "") if pid == x.get("suggested_patch") else ""})
+        else:
+            for k in ("uses_patch", "uses_patch_name", "patch_usage"):
+                x.pop(k, None)
+    _save_sl(data)
+    return data
 
 
 @app.post("/api/setlists/{sid}/generic-patches")

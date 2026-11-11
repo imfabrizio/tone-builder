@@ -133,6 +133,7 @@
             <button class="btn primary" id="helixBtn">Crea il file per Helix Stadium</button>
             <button class="btn primary" id="qcBtn">Scrivi sul Quad Cortex</button>
             <button class="btn ghost" id="dupBtn">Duplica come nuovo preset</button>
+            <button class="btn ghost" id="delPresetBtn">Elimina questo preset</button>
             <button class="btn ghost" id="exportJson">Salva la ricetta (.json)</button>
             <label class="btn ghost">Importa preset<input type="file" id="importFile" accept=".hlx,.hsp,.json" hidden></label>
           </div>
@@ -336,6 +337,12 @@
     </div>
     <p class="hint" id="wholeIrs"></p>
 
+    <h3>Patch generiche</h3>
+    <div class="row">
+      <button class="btn" id="wholeAssign">Vedi le patch e assegnale ai brani</button>
+      <span class="hint">Per crearne di nuove usa Riduci a patch generiche: sostituiscono quelle attuali.</span>
+    </div>
+
     <h3>File</h3>
     <div class="row">
       <button class="btn" id="wholeZip">Scarica tutti i file Helix (.zip)</button>
@@ -346,6 +353,21 @@
     <div class="table-wrap"><table class="uses-table overview" id="wholeOverview"></table></div>
 
     <div class="dlg-actions"><button class="btn ghost" id="wholeClose">Chiudi</button></div>
+  </div>
+</dialog>
+
+<dialog id="assignDlg" class="dlg wide">
+  <div class="dlg-body">
+    <h2>Patch generiche e brani</h2>
+    <p class="hint">Le patch generiche sono un lavoro a sé: qui le vedi riassunte e decidi tu quale usare per ogni brano. Il menu è già impostato sulla patch che ti suggerisco; cambiandolo, l'assegnazione si salva subito.</p>
+    <div class="patch-cards" id="assignCards"></div>
+    <h3>Assegnazione ai brani</h3>
+    <div class="table-wrap"><table class="uses-table" id="assignTable"></table></div>
+    <div class="dlg-actions">
+      <button class="btn ghost" id="assignClose">Chiudi</button>
+      <button class="btn ghost" id="assignNone">Togli tutte le assegnazioni</button>
+      <button class="btn primary" id="assignSuggested">Assegna secondo la proposta</button>
+    </div>
   </div>
 </dialog>
 

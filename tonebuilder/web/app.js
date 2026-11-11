@@ -160,7 +160,8 @@ function renderSongs() {
   const list = $("#songList");
   list.innerHTML = S.setlist.songs.map((s, i) => `
     <li class="${i === S.songIdx ? "active" : ""} ${s.kind === "patch" ? "patch" : ""}" data-i="${i}">
-      <span class="t">${esc(s.title || "Senza titolo")}<span class="a">${esc(s.artist || "")}</span>${s.uses_patch ? `<span class="uses">Patch: ${esc(s.uses_patch_name || "")}</span>` : ""}</span>
+      <span class="t">${esc(s.title || "Senza titolo")}<span class="a">${esc(s.artist || "")}</span>${s.uses_patch ? `<span class="uses">Patch: ${esc(s.uses_patch_name || "")}</span>`
+        : s.suggested_patch && !s.recipe ? `<span class="uses sugg">Suggerita: ${esc(s.suggested_patch_name || "")}</span>` : ""}</span>
       <span class="dot ${s.recipe || s.uses_patch ? "ready" : ""}" title="${s.recipe ? "Preset pronto" : s.uses_patch ? "Usa una patch generica" : "Da progettare"}"></span>
       <button class="del" data-del="${i}" aria-label="Elimina brano">✕</button>
     </li>`).join("");
@@ -299,12 +300,25 @@ function renderPatchInfo() {
   const box = $("#patchInfo");
   if (!s) { box.classList.add("hidden"); return; }
   if (s.kind === "patch") {
-    box.innerHTML = `<strong>Patch generica</strong> per ${(s.covers || []).length} brani:<ul>${(s.covers || []).map((c) => `<li>${esc(c)}</li>`).join("")}</ul>`;
+    const used = s.covers || [];
+    box.innerHTML = `<strong>Patch generica "${esc(s.title || "")}"</strong>
+      ${(s.summary || []).length ? `<ul class="summary">${s.summary.map((p) => `<li>${esc(p)}</li>`).join("")}</ul>` : ""}
+      <p class="hint">${used.length ? `Assegnata a: ${used.map(esc).join(", ")}` : "Non ancora assegnata a nessun brano."}
+      ${(s.suggested_for || []).length ? ` Pensata per: ${s.suggested_for.map(esc).join(", ")}.` : ""}</p>
+      <div class="row"><button class="btn" data-open-assign="1">Assegna ai brani</button></div>`;
+    box.classList.remove("hidden");
+  } else if (!s.uses_patch && s.suggested_patch && !s.recipe) {
+    box.innerHTML = `<strong>Ti suggerisco la patch generica "${esc(s.suggested_patch_name || "")}".</strong>
+      ${s.suggested_usage ? `<p class="hint">${esc(s.suggested_usage)}</p>` : ""}
+      <div class="row"><button class="btn primary" data-use-patch="${esc(s.suggested_patch)}">Usa questa patch</button>
+      <button class="btn" data-open-patch="${esc(s.suggested_patch)}">Apri la patch</button>
+      <button class="btn ghost" data-open-assign="1">Scegli un'altra patch</button></div>`;
     box.classList.remove("hidden");
   } else if (s.uses_patch) {
     box.innerHTML = `<strong>Questo brano usa la patch generica "${esc(s.uses_patch_name || "")}".</strong>
       ${s.patch_usage ? `<p class="hint">${esc(s.patch_usage)}</p>` : ""}
       <div class="row"><button class="btn" data-open-patch="${esc(s.uses_patch)}">Apri la patch</button>
+      <button class="btn ghost" data-open-assign="1">Cambia patch</button>
       ${s.recipe ? "" : `<span class="hint">Se questo brano ha bisogno di una patch sua, usa Progetta.</span>`}</div>`;
     box.classList.remove("hidden");
   } else box.classList.add("hidden");
@@ -818,7 +832,10 @@ async function executeAction(action) {
   }
   if (res.job) {
     await pollJob(res.job, { youtube: "Ascolto i brani", "design-all": "Creo i preset", generic: "Creo le patch generiche", "edit-many": "Modifico i preset" }[res.job]);
-    log.push({ who: "ai", text: "Fatto. Trovi tutto nella scaletta: dimmi cosa vuoi ritoccare." });
+    log.push({ who: "ai", text: res.job === "generic"
+      ? "Fatto: le patch sono pronte. Ti ho aperto il riepilogo: scegli tu a quali brani assegnarle."
+      : "Fatto. Trovi tutto nella scaletta: dimmi cosa vuoi ritoccare." });
+    if (res.job === "generic") openAssign().catch(() => {});
   } else {
     await openSetlist(S.setlist.id, res.song_index);
     switchTab("preset");
@@ -907,6 +924,26 @@ async function sendChat(e) {
   }
   renderAssist();
   saveSoon();
+}
+
+/* elimina il preset del brano (il brano resta in scaletta); per una patch generica elimina la patch */
+async function deletePreset() {
+  const s = song();
+  if (!s?.recipe) return;
+  const i = S.songIdx;
+  if (s.kind === "patch") {
+    const users = S.setlist.songs.filter((y) => y.uses_patch === s.id).length;
+    if (!confirm(`Eliminare la patch "${s.title}"?${users ? ` ${users} brani la usano: resteranno senza patch.` : ""}`)) return;
+    S.setlist.songs.splice(i, 1);
+  } else {
+    if (!confirm(`Eliminare il preset di "${s.title || "questo brano"}"? Il brano resta in scaletta.`)) return;
+    for (const k of ["recipe", "prev_recipe", "last_changes", "warnings"]) delete s[k];
+  }
+  try {
+    await saveNow();
+    await openSetlist(S.setlist.id, Math.min(i, S.setlist.songs.length - 1));
+    toast("Preset eliminato");
+  } catch (e) { toast(e.message, true); }
 }
 
 function duplicateSong() {
@@ -1201,6 +1238,7 @@ async function createGeneric() {
     S.reduceProposal.use_iridium = S.hasIridium && $("#reduceIridium").checked;
     await api("POST", `/api/setlists/${S.setlist.id}/generic-patches`, { proposal: S.reduceProposal });
     await pollJob("generic", "Creo le patch generiche");
+    await openAssign();
   } catch (e) { toast(e.message, true); }
 }
 
@@ -1264,7 +1302,12 @@ function bindReduce() {
   $("#reduceDlg").addEventListener("close", () => { reduceTalk.on = false; reduceTalk.ctl.stop?.(); window.speechSynthesis?.cancel(); });
   attachMic($("#reduceInput"));
   attachMic($("#reduceNotes"));
-  $("#patchInfo").addEventListener("click", (e) => {
+  $("#patchInfo").addEventListener("click", async (e) => {
+    if (e.target.dataset.openAssign) { openAssign().catch((err) => toast(err.message, true)); return; }
+    if (e.target.dataset.usePatch) {
+      try { await assignPatches({ [song().id]: e.target.dataset.usePatch }); toast("Patch assegnata"); } catch (err) { toast(err.message, true); }
+      return;
+    }
     const id = e.target.dataset.openPatch;
     if (!id) return;
     const i = S.setlist.songs.findIndex((x) => x.id === id);
@@ -1680,7 +1723,7 @@ async function renderWhole() {
   $("#wholeOverview").innerHTML = head + "<tbody>" + rows.map((r) => {
     const title = `${r.kind === "patch" ? "<strong>Patch</strong> " : ""}${esc(r.title || "senza titolo")}${r.artist && r.kind !== "patch" ? ` <small>${esc(r.artist)}</small>` : ""}`;
     if (!r.has_recipe) {
-      return `<tr><td><button class="link" data-goto="${r.index}">${title}</button></td><td colspan="5" class="muted">${r.uses_patch_name ? `usa la patch ${esc(r.uses_patch_name)}` : "nessun preset"}</td></tr>`;
+      return `<tr><td><button class="link" data-goto="${r.index}">${title}</button></td><td colspan="5" class="muted">${r.uses_patch_name ? `usa la patch ${esc(r.uses_patch_name)}` : r.suggested_patch_name ? `nessun preset, patch suggerita ${esc(r.suggested_patch_name)} (da assegnare)` : "nessun preset"}</td></tr>`;
     }
     const b = r.blocks;
     return `<tr><td><button class="link" data-goto="${r.index}">${title}</button></td>
@@ -1740,6 +1783,56 @@ async function wholeZip() {
   });
 }
 
+/* patch generiche: riepilogo e assegnazione ai brani */
+async function assignPatches(assignments, suggested = false) {
+  await saveNow();
+  const data = await api("POST", `/api/setlists/${S.setlist.id}/assign`, suggested ? { suggested: true } : { assignments });
+  S.setlist = data;
+  renderSongs();
+  if (S.songIdx >= 0) openSong(Math.min(S.songIdx, S.setlist.songs.length - 1));
+  if ($("#assignDlg").open) renderAssign();
+}
+
+function renderAssign() {
+  const songs = S.setlist.songs;
+  const patches = songs.filter((x) => x.kind === "patch" && x.recipe);
+  if (!patches.length) {
+    $("#assignCards").innerHTML = `<p class="hint">Non ci sono ancora patch generiche: creale con Riduci a patch generiche.</p>`;
+    $("#assignTable").innerHTML = "";
+    $("#assignSuggested").disabled = true;
+    return;
+  }
+  $("#assignSuggested").disabled = !songs.some((x) => x.suggested_patch);
+  $("#assignCards").innerHTML = patches.map((p) => {
+    const n = songs.filter((x) => x.uses_patch === p.id).length;
+    return `<article class="patch-card"><h4>${esc(p.title)}</h4>
+      <ul>${(p.summary || []).map((t) => `<li>${esc(t)}</li>`).join("") || `<li>${esc(p.recipe.description || "")}</li>`}</ul>
+      <p class="hint">${n ? `Assegnata a ${n} ${n === 1 ? "brano" : "brani"}` : "Non assegnata"}</p>
+      <button class="btn ghost small" data-goto-id="${esc(p.id)}">Apri la patch</button></article>`;
+  }).join("");
+  const opts = (sel) => `<option value="">— nessuna —</option>` + patches.map((p) =>
+    `<option value="${esc(p.id)}" ${p.id === sel ? "selected" : ""}>${esc(p.title)}</option>`).join("");
+  $("#assignTable").innerHTML = `<thead><tr><th>Brano</th><th>Suggerita</th><th>Patch usata</th></tr></thead><tbody>${
+    songs.filter((x) => x.kind !== "patch").map((x) => {
+      const cur = x.uses_patch || "";
+      const pending = !cur && x.suggested_patch;
+      return `<tr class="${pending ? "pend" : ""}"><td>${esc(x.title || "Senza titolo")} <small>${esc(x.artist || "")}</small>
+          ${x.recipe ? `<small>ha anche un preset suo</small>` : ""}</td>
+        <td>${x.suggested_patch ? `${esc(x.suggested_patch_name || "")}${x.suggested_usage ? `<small>${esc(x.suggested_usage)}</small>` : ""}` : "—"}</td>
+        <td><select data-assign="${esc(x.id)}" aria-label="Patch per ${esc(x.title || "")}">${opts(cur || x.suggested_patch || "")}</select>
+          ${pending ? `<small>proposta, non ancora assegnata</small>` : ""}</td></tr>`;
+    }).join("")}</tbody>`;
+}
+
+async function openAssign() {
+  if (!S.setlist) return;
+  await saveNow();
+  S.setlist = await api("GET", `/api/setlists/${S.setlist.id}`);
+  renderSongs();
+  renderAssign();
+  if (!$("#assignDlg").open) $("#assignDlg").showModal();
+}
+
 /* tabella "cosa usa questo preset" */
 function renderUses() {
   const r = recipe();
@@ -1769,6 +1862,25 @@ function bindSetlistTools() {
   $("#spotifyConnect").addEventListener("click", () => { location.href = "/api/spotify/login"; });
   $("#suggestGuitars").addEventListener("click", suggestGuitars);
   $("#openWhole").addEventListener("click", () => openWhole().catch((e) => toast(e.message, true)));
+  $("#wholeAssign").addEventListener("click", () => { $("#wholeDlg").close(); openAssign().catch((e) => toast(e.message, true)); });
+  $("#assignClose").addEventListener("click", () => $("#assignDlg").close());
+  $("#assignSuggested").addEventListener("click", () => assignPatches(null, true).then(() => toast("Patch assegnate secondo la proposta")).catch((e) => toast(e.message, true)));
+  $("#assignNone").addEventListener("click", () => {
+    if (!confirm("Tolgo la patch da tutti i brani? Le patch restano, cambiano solo le assegnazioni.")) return;
+    const all = Object.fromEntries(S.setlist.songs.filter((x) => x.kind !== "patch").map((x) => [x.id, null]));
+    assignPatches(all).catch((e) => toast(e.message, true));
+  });
+  $("#assignTable").addEventListener("change", (e) => {
+    const id = e.target.dataset.assign;
+    if (id) assignPatches({ [id]: e.target.value || null }).catch((err) => toast(err.message, true));
+  });
+  $("#assignCards").addEventListener("click", async (e) => {
+    const id = e.target.dataset.gotoId;
+    if (!id) return;
+    $("#assignDlg").close();
+    const i = S.setlist.songs.findIndex((x) => x.id === id);
+    if (i >= 0) { openSong(i); switchTab("preset"); }
+  });
   $("#wholeClose").addEventListener("click", () => $("#wholeDlg").close());
   $("#wholeCreate").addEventListener("click", () => wholeCreate().catch((e) => toast(e.message, true)));
   $("#wholeEditRun").addEventListener("click", () => wholeEdit().catch((e) => toast(e.message, true)));
@@ -1868,10 +1980,13 @@ function bindAll() {
   $("#songList").addEventListener("click", (e) => {
     if (e.target.dataset.del !== undefined) {
       const i = +e.target.dataset.del;
-      if (!confirm(`Eliminare "${S.setlist.songs[i].title || "Senza titolo"}"?`)) return;
+      const x = S.setlist.songs[i];
+      const users = x.kind === "patch" ? S.setlist.songs.filter((y) => y.uses_patch === x.id).length : 0;
+      if (!confirm(x.kind === "patch"
+        ? `Eliminare la patch "${x.title}"?${users ? ` ${users} brani la usano: resteranno senza patch.` : ""}`
+        : `Eliminare "${x.title || "Senza titolo"}"?`)) return;
       S.setlist.songs.splice(i, 1);
-      saveSoon();
-      openSong(Math.min(i, S.setlist.songs.length - 1));
+      saveNow().then(() => openSetlist(S.setlist.id, Math.min(i, S.setlist.songs.length - 1))).catch((err) => toast(err.message, true));
       return;
     }
     const li = e.target.closest("li[data-i]");
@@ -1902,6 +2017,7 @@ function bindAll() {
 
   $("#helixBtn").addEventListener("click", () => makeHelix().catch(() => {}));
   $("#dupBtn").addEventListener("click", duplicateSong);
+  $("#delPresetBtn").addEventListener("click", deletePreset);
   ["#chatInput", "#reqDescription", "#reqSnapshots", "#reqPrefs", "#reqGuitar"].forEach((sel) => attachMic($(sel)));
   $("#qcBtn").addEventListener("click", openQC);
   $("#qcPlanBtn").addEventListener("click", () => qcPlan().catch(() => {}));

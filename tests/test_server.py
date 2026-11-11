@@ -159,8 +159,20 @@ def test_generic_patches_dialog_and_youtube(recipe, monkeypatch, tmp_path):
     assert not st["errors"], st
     data = c.get(f"/api/setlists/{sid}").json()
     assert data["songs"][0]["kind"] == "patch" and data["songs"][0]["recipe"]
-    assert all(s.get("uses_patch") == data["songs"][0]["id"] for s in data["songs"][1:])
+    pid = data["songs"][0]["id"]
+    # le patch nascono come lavoro a se': ai brani c'e' solo il suggerimento
+    assert all(s.get("suggested_patch") == pid and not s.get("uses_patch") for s in data["songs"][1:])
+    assert data["songs"][0]["summary"]
+    data = c.post(f"/api/setlists/{sid}/assign", json={"suggested": True}).json()
+    assert all(s.get("uses_patch") == pid for s in data["songs"][1:])
     assert data["songs"][1]["patch_usage"] == "strofa Crunch"
+    data = c.post(f"/api/setlists/{sid}/assign", json={"assignments": {data["songs"][2]["id"]: None}}).json()
+    assert not data["songs"][2].get("uses_patch") and data["songs"][1].get("uses_patch") == pid
+    # cancellando la patch, i brani non risultano piu' collegati
+    gone = dict(data, songs=data["songs"][1:])
+    c.put(f"/api/setlists/{sid}", json=gone)
+    data = c.get(f"/api/setlists/{sid}").json()
+    assert not any(s.get("uses_patch") or s.get("suggested_patch") for s in data["songs"])
 
     # YouTube: download simulato
     wav = tmp_path / "x.wav"

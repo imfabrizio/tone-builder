@@ -153,6 +153,41 @@ def generic_request(group: dict, songs: list[dict], gear_text: str, use_iridium:
     )
 
 
+SUMMARY_PROMPT = """Descrivi questa patch per chitarra a un chitarrista, in italiano, in 4-6 punti brevi (massimo 12 parole
+l'uno): carattere del suono (es. "clean molto colorato, tanti effetti"), ampli e gain, effetti principali, snapshot e
+per quali brani o sezioni e' adatta. Rispondi SOLO in JSON: {"points": ["...", "..."]}"""
+
+
+def _fallback_summary(recipe) -> list[str]:
+    by = lambda *roles: [b.gear_ref or b.label for b in recipe.chain if b.role in roles]  # noqa: E731
+    pts = []
+    if recipe.description:
+        pts.append(recipe.description)
+    if by("amp", "preamp"):
+        pts.append("Ampli: " + ", ".join(by("amp", "preamp")))
+    if by("drive"):
+        pts.append("Drive: " + ", ".join(by("drive")))
+    fx = by("mod", "delay", "reverb", "pitch", "filter", "synth")
+    if fx:
+        pts.append("Effetti: " + ", ".join(fx))
+    if recipe.snapshots:
+        pts.append("Snapshot: " + ", ".join(s.name for s in recipe.snapshots))
+    return pts[:6]
+
+
+def summarize_patch(recipe, group: dict, provider: LLMProvider) -> list[str]:
+    """Scheda riassuntiva di una patch in 4-6 punti; se l'AI non risponde, la ricava dai blocchi."""
+    try:
+        data = provider.complete_json(SUMMARY_PROMPT, f"PATCH \"{recipe.name}\" ({group.get('description', '')})\n"
+                                      + recipe.model_dump_json(include={"description", "chain", "snapshots"}))
+        pts = [str(p).strip() for p in (data.get("points") or []) if str(p).strip()]
+        if 3 <= len(pts) <= 8:
+            return pts[:6]
+    except Exception:
+        pass
+    return _fallback_summary(recipe)
+
+
 # ---------------------------------------------------------------- dialogo
 
 DIALOG_PROMPT = """Sei il tecnico del suono di un chitarrista e parli con lui (spesso a voce) per progettare i suoni
@@ -177,7 +212,8 @@ Azioni possibili (campo "action"):
   crea (o rifa' da zero) il preset di un brano;
 - {"type": "edit_song", "song_index": N, "instruction": "..."} modifica il preset esistente di un brano;
 - {"type": "generic_patches", "max_patches": N, "notes": "indicazioni del chitarrista"} riduce la scaletta a patch generiche
-  corpose e le crea;
+  corpose e le crea come lavoro a se': per ogni brano registra solo la patch suggerita, l'assegnazione la conferma il
+  chitarrista nel riepilogo;
 - {"type": "edit_many", "target": "patches" | "songs" | "all" | [indici], "instruction": "..."} applica la stessa
   modifica a piu' preset ESISTENTI (es. "usa gli IR in tutte le patch", "meno riverbero ovunque"): li modifica, non li
   ricrea;
@@ -202,6 +238,8 @@ def setlist_context(setlist: dict, current: int | None, gear_text: str, jobs_tex
         state = "patch generica" if s.get("kind") == "patch" else ("preset pronto" if s.get("recipe") else "senza preset")
         if s.get("uses_patch"):
             state = f"usa la patch {s.get('uses_patch_name', '')}"
+        elif s.get("suggested_patch") and not s.get("recipe"):
+            state = f"senza preset, patch suggerita {s.get('suggested_patch_name', '')} (non ancora assegnata)"
         heard = ", ascoltato" if (s.get("audio") or {}).get("analysis") else ""
         mark = "  <- brano aperto" if current == i else ""
         rows.append(f"{i}. {s.get('artist') or ''} - {s.get('title') or 'senza titolo'} [{state}{heard}]{mark}")

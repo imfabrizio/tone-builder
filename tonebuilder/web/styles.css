@@ -403,3 +403,14 @@ code { background: var(--tolex); padding: 1px 5px; border-radius: 3px; font-size
 .uses-table .link { background: none; border: 0; color: var(--ink); text-align: left; padding: 0; font: inherit; cursor: pointer; text-decoration: underline; text-decoration-color: var(--line); }
 .uses-table .link:hover { text-decoration-color: var(--lamp); }
 #wholeDlg h3 { margin: 18px 0 8px; font-size: 15px; }
+
+/* patch generiche: schede e assegnazione */
+.patch-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 12px; margin: 10px 0 4px; }
+.patch-card { border: 1px solid var(--line); border-radius: var(--radius-s); padding: 12px 14px; background: var(--tolex-2); display: flex; flex-direction: column; gap: 6px; }
+.patch-card h4 { margin: 0; font-size: 15px; color: var(--lamp); }
+.patch-card ul, #patchInfo ul.summary { margin: 0; padding-left: 18px; font-size: 13px; display: grid; gap: 3px; }
+.patch-card .btn { align-self: flex-start; margin-top: auto; }
+#assignTable select { min-width: 180px; }
+#assignTable tr.pend td { background: rgba(242,169,59,.08); }
+#assignTable small { display: block; color: var(--ink-2); }
+.songs .uses.sugg { opacity: .65; font-style: italic; }
