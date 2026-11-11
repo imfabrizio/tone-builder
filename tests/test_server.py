@@ -73,3 +73,42 @@ def test_settings_never_leak_keys(monkeypatch):
     p = st["settings"]["providers"]["claude"]
     assert p["api_key"] == "" and p["has_key"] and p["key_hint"] == "…1234"
     assert "secret" not in json.dumps(st)
+
+
+def test_gear_import_and_setlist_automation(recipe, monkeypatch):
+    import time
+
+    class SetlistAI(StubAI):
+        def complete_json(self, system, user, *, audio_path=None):
+            if "tecnico di palco" in system:
+                return {"songs": [{"index": 0, "guitar": "Fender Telecaster", "pickups": "ponte", "tuning": "standard",
+                                   "original": "Gibson", "reason": "suono asciutto"}]}
+            return recipe.model_dump()
+
+    stub = SetlistAI(recipe.model_dump())
+    monkeypatch.setattr(srv, "_provider", lambda name=None: stub)
+    c = TestClient(srv.app)
+
+    g = c.get("/api/gear").json()
+    assert "configs" in g
+    body = {"guitars": [{"name": "Fender Telecaster", "config": "SS", "pickups": {"ponte": "Fender Broadcaster (Tele)"}}],
+            "devices": ["Helix Stadium"], "other": ""}
+    assert c.put("/api/gear", json=body).status_code == 200
+    assert c.get("/api/gear/search?kind=pickup&q=JB").json()[0]["name"].startswith("Seymour Duncan JB")
+
+    sl = c.post("/api/setlists/import", json={"text": "The Cranberries - Zombie\nAlanis Morissette - Ironic", "name": "90s"}).json()
+    assert [s["title"] for s in sl["songs"]] == ["Zombie", "Ironic"]
+
+    sl = c.post(f"/api/setlists/{sl['id']}/suggest-guitars").json()
+    assert sl["songs"][0]["request"]["guitar"].startswith("Fender Telecaster")
+    assert "asciutto" in sl["songs"][0]["guitar_reason"]
+
+    c.post(f"/api/setlists/{sl['id']}/design-all", json={})
+    for _ in range(50):
+        st = c.get(f"/api/setlists/{sl['id']}/design-all").json()
+        if not st["running"]:
+            break
+        time.sleep(0.1)
+    assert st["done"] == 2 and not st["errors"]
+    final = c.get(f"/api/setlists/{sl['id']}").json()
+    assert all(s["recipe"] for s in final["songs"])

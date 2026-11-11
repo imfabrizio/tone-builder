@@ -33,6 +33,7 @@ class DesignRequest(BaseModel):
     snapshots: str = ""  # es. "Intro pulito, Strofa crunch, Assolo lead con delay"
     gear_preferences: str = ""  # es. "preferisco ampli Marshall, niente fuzz"
     audio_analysis: str = ""  # testo prodotto dall'analisi della traccia
+    gear: str = ""  # strumentazione disponibile (chitarre, pickup, accordature)
     references: list[dict[str, Any]] = []  # ricette importate da usare come base
 
 
@@ -179,6 +180,10 @@ def _user_prompt(req: DesignRequest, research: str) -> str:
     ]
     if req.gear_preferences:
         parts.append(f"PREFERENZE: {req.gear_preferences}")
+    if req.gear:
+        parts.append("STRUMENTAZIONE DELL'UTENTE (tarare gain ed EQ su questi pickup; se la chitarra non e' indicata "
+                     "scegli la piu' adatta da qui e scrivila in guitar.description; nelle notes indica il pickup da usare "
+                     f"in ogni snapshot):\n{req.gear}")
     if req.audio_analysis:
         parts.append(f"ANALISI DELLA TRACCIA AUDIO:\n{req.audio_analysis}")
     if research:
@@ -302,4 +307,30 @@ def describe_audio(provider: LLMProvider, audio_path: str, features_text: str = 
     )
 
 
-__all__ = ["DesignRequest", "DesignResult", "design", "edit", "describe_audio", "system_prompt", "Role"]
+SUGGEST_PROMPT = """Sei il tecnico di palco di un chitarrista. Per ogni brano della scaletta scegli, tra le chitarre
+dell'utente, quella che rende meglio il suono originale, e indica pickup per le parti principali e accordatura.
+Considera la chitarra originale del brano, il tipo di pickup (single/humbucker/P90), l'accordatura e la praticita'
+dal vivo (poche sostituzioni di chitarra tra brani consecutivi, a parita' di resa).
+
+Rispondi in JSON: {"songs": [{"index": 0, "guitar": "nome esatto della chitarra", "pickups": "es. ponte per la
+strofa, manico per l'assolo", "tuning": "es. standard, mezzo tono sotto", "original": "chitarra usata nel disco",
+"reason": "una frase"}]}. Scrivi in italiano."""
+
+
+def suggest_guitars(songs: list[dict], gear_text: str, provider: LLMProvider) -> list[dict]:
+    if not gear_text:
+        raise AIError("Prima inserisci la tua strumentazione (pulsante Strumentazione in alto)")
+    listing = "\n".join(f"{i}. {s.get('artist') or '?'} - {s.get('title') or '?'}" for i, s in enumerate(songs))
+    data = provider.complete_json(SUGGEST_PROMPT, f"CHITARRE DISPONIBILI:\n{gear_text}\n\nSCALETTA:\n{listing}")
+    out = []
+    for row in data.get("songs", []):
+        try:
+            i = int(row.get("index"))
+        except (TypeError, ValueError):
+            continue
+        if 0 <= i < len(songs):
+            out.append({"index": i, **{k: str(row.get(k) or "") for k in ("guitar", "pickups", "tuning", "original", "reason")}})
+    return out
+
+
+__all__ = ["suggest_guitars", "DesignRequest", "DesignResult", "design", "edit", "describe_audio", "system_prompt", "Role"]

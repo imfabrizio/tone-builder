@@ -41,6 +41,7 @@ class Settings(BaseModel):
     helix_output_dir: str = ""  # dove salvare i .hsp generati
     qc_target_setlist_slot: str = ""  # es. "30A": primo slot libero da usare sul QC
     demucs_command: str = ""  # facoltativo: percorso di demucs.exe o del python che lo contiene
+    spotify_client_id: str = ""  # app personale su developer.spotify.com (flusso PKCE, nessun segreto)
     language: str = "it"
 
     def active(self) -> ProviderSettings:

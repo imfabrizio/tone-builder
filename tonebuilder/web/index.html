@@ -13,6 +13,7 @@
 <header class="topbar">
   <div class="brand"><span class="lamp" aria-hidden="true"></span>Tone Builder</div>
   <div class="top-status" id="topStatus"></div>
+  <button class="btn ghost" id="openGear">Strumentazione</button>
   <button class="btn ghost" id="openSettings">Impostazioni</button>
 </header>
 
@@ -25,6 +26,9 @@
     </div>
     <ol class="songs" id="songList"></ol>
     <button class="btn wide" id="addSong">Aggiungi brano</button>
+    <button class="btn wide ghost" id="openImport">Importa scaletta</button>
+    <button class="btn wide ghost" id="suggestGuitars">Proponi le chitarre</button>
+    <button class="btn wide ghost" id="designAll">Crea tutti i preset</button>
     <button class="btn wide ghost" id="openMerge">Unisci suoni da più preset</button>
   </aside>
 
@@ -55,7 +59,8 @@
           </div>
           <div class="field">
             <label for="reqGuitar">Chitarra che userai</label>
-            <input id="reqGuitar" placeholder="Es. Strat SSS, Les Paul con humbucker">
+            <input id="reqGuitar" placeholder="Vuoto = la sceglie l'AI dalla tua strumentazione">
+            <span class="hint" id="guitarReason"></span>
           </div>
           <div class="field">
             <label for="reqPrefs">Preferenze</label>
@@ -178,6 +183,11 @@
       <div class="field"><label for="presetFolders">Cartelle con preset scaricati (.hlx, .hsp), una per riga</label><textarea id="presetFolders" rows="2"></textarea></div>
     </fieldset>
     <fieldset>
+      <legend>Spotify</legend>
+      <p class="hint">Per importare le playlist: crea un'app gratuita su developer.spotify.com/dashboard (API: Web API) con Redirect URI <code id="spRedirect">http://127.0.0.1:8765/api/spotify/callback</code> e incolla qui il Client ID. Spotify richiede che il proprietario dell'app abbia Premium.</p>
+      <div class="field"><label for="spClientId">Client ID</label><input id="spClientId" autocomplete="off"></div>
+    </fieldset>
+    <fieldset>
       <legend>Separazione della chitarra</legend>
       <p class="hint" id="demucsStatus"></p>
       <div class="field"><label for="demucsCmd">Percorso di demucs.exe (solo se non viene trovato da solo)</label><input id="demucsCmd" placeholder="Es. C:\Users\nome\.local\bin\demucs.exe"></div>
@@ -187,6 +197,49 @@
       <button type="button" class="btn primary" id="saveSettings">Salva</button>
     </div>
   </form>
+</dialog>
+
+<dialog id="gearDlg" class="dlg wide">
+  <div class="dlg-body">
+    <h2>La mia strumentazione</h2>
+    <p class="hint">Le chitarre che hai a disposizione: l'AI sceglie quella giusta per ogni brano e tara gain ed EQ sui pickup. I modelli di chitarra vengono cercati su Wikidata (database pubblico); per i pickup c'è un elenco dei modelli più diffusi, ma puoi sempre scrivere a mano.</p>
+    <div id="gearList"></div>
+    <datalist id="guitarOptions"></datalist>
+    <datalist id="pickupOptions"></datalist>
+    <button class="btn" id="addGuitar">Aggiungi chitarra</button>
+    <div class="field"><label for="gearOther">Altro (pedali o ampli reali, wah esterno, EBow…)</label><textarea id="gearOther" rows="2"></textarea></div>
+    <div class="dlg-actions">
+      <button class="btn ghost" id="gearClose">Chiudi</button>
+      <button class="btn primary" id="gearSave">Salva</button>
+    </div>
+  </div>
+</dialog>
+
+<dialog id="importDlg" class="dlg wide">
+  <div class="dlg-body">
+    <h2>Importa scaletta</h2>
+    <fieldset>
+      <legend>Da una playlist Spotify</legend>
+      <p class="hint" id="spotifyStatus"></p>
+      <div class="row">
+        <select id="spotifyPlaylists" style="flex:1"><option value="">Scegli una tua playlist…</option></select>
+        <button type="button" class="btn" id="spotifyConnect">Collega Spotify</button>
+      </div>
+      <input id="spotifyLink" placeholder="…oppure incolla il link della playlist (deve essere tua o condivisa con te)">
+    </fieldset>
+    <fieldset>
+      <legend>Da un elenco</legend>
+      <textarea id="importText" rows="6" placeholder="Un brano per riga, es.&#10;The Cranberries - Zombie&#10;Alanis Morissette - Ironic&#10;Gianna Nannini - Bello e impossibile&#10;(va bene anche il CSV esportato con Exportify)"></textarea>
+    </fieldset>
+    <div class="row">
+      <div class="field" style="flex:1"><label for="importName">Nome della scaletta</label><input id="importName" placeholder="Es. Capodanno 90's"></div>
+      <label class="check"><input type="checkbox" id="importAppend"> Aggiungi alla scaletta aperta</label>
+    </div>
+    <div class="dlg-actions">
+      <button class="btn ghost" id="importClose">Chiudi</button>
+      <button class="btn primary" id="importRun">Importa</button>
+    </div>
+  </div>
 </dialog>
 
 <dialog id="qcDlg" class="dlg">

@@ -183,6 +183,7 @@ function openSong(i) {
   $("#reqGuitar").value = rq.guitar || "";
   $("#reqPrefs").value = rq.gear_preferences || "";
   $("#reqSnapshots").value = rq.snapshots || "";
+  $("#guitarReason").textContent = s.guitar_reason || "";
   renderAnalysis();
   switchTab(s.recipe ? "preset" : "design");
   renderPreset();
@@ -728,6 +729,8 @@ function openSettings() {
   $("#irFolders").value = (st.ir_folders || []).join("\n");
   $("#presetFolders").value = (st.preset_folders || []).join("\n");
   $("#demucsCmd").value = st.demucs_command || "";
+  $("#spClientId").value = st.spotify_client_id || "";
+  $("#spRedirect").textContent = `${location.origin}/api/spotify/callback`;
   $("#demucsStatus").textContent = S.status.optional.demucs
     ? "Demucs trovato: la chitarra viene isolata prima dell'analisi."
     : "Demucs non trovato: l'analisi usa il mix completo. Le istruzioni per installarlo sono nel README, sezione Separazione della chitarra.";
@@ -769,6 +772,7 @@ async function saveSettings() {
     ir_folders: $("#irFolders").value.split("\n").map((x) => x.trim()).filter(Boolean),
     preset_folders: $("#presetFolders").value.split("\n").map((x) => x.trim()).filter(Boolean),
     demucs_command: $("#demucsCmd").value.trim(),
+    spotify_client_id: $("#spClientId").value.trim(),
   };
   await busy("Salvo…", () => api("PUT", "/api/settings", body));
   await loadStatus();
@@ -882,6 +886,166 @@ function bindMerge() {
     $("#mergeDlg").close();
     renderSongs(); renderAssist(); switchTab("preset"); recipeChanged();
   });
+}
+
+
+/* ---------------------------------------------------------------- strumentazione */
+
+const POSITIONS = { SSS: ["manico", "centrale", "ponte"], HSS: ["manico", "centrale", "ponte"], HSH: ["manico", "centrale", "ponte"],
+  HH: ["manico", "ponte"], SS: ["manico", "ponte"], H: ["ponte"], P90: ["ponte"], "P90 P90": ["manico", "ponte"],
+  "Mini-HH": ["manico", "ponte"], Piezo: ["piezo"], Altro: ["manico", "ponte"] };
+S.gear = null;
+
+async function openGear() {
+  S.gear = await api("GET", "/api/gear");
+  renderGear();
+  $("#gearOther").value = S.gear.other || "";
+  $("#gearDlg").showModal();
+}
+
+function renderGear() {
+  const g = S.gear;
+  $("#gearList").innerHTML = g.guitars.length ? g.guitars.map((gt, i) => {
+    const pos = POSITIONS[gt.config] || ["manico", "ponte"];
+    return `<div class="guitar-card" data-i="${i}">
+      <div class="editor-head"><h3>${esc(gt.name || "Nuova chitarra")}</h3><button class="btn ghost" data-rm-guitar="${i}">Rimuovi</button></div>
+      <div class="editor-grid">
+        <div class="field"><label>Modello</label><input data-g="name" list="guitarOptions" value="${esc(gt.name)}" placeholder="Es. Fender Stratocaster"></div>
+        <div class="field"><label>Configurazione pickup</label><select data-g="config"><option value="">—</option>${g.configs.map((c) => `<option ${c === gt.config ? "selected" : ""}>${c}</option>`).join("")}</select></div>
+        <div class="field"><label>Accordatura</label><input data-g="tuning" value="${esc(gt.tuning)}"></div>
+        ${pos.map((p) => `<div class="field"><label>Pickup ${p}</label><input data-pk="${p}" list="pickupOptions" value="${esc(gt.pickups?.[p] || "")}" placeholder="Modello o descrizione"></div>`).join("")}
+        <div class="field"><label>Note</label><input data-g="notes" value="${esc(gt.notes)}" placeholder="Es. corde 10-46, push-pull coil split"></div>
+      </div></div>`;
+  }).join("") : `<p class="hint">Nessuna chitarra ancora: aggiungi quelle che porti sul palco.</p>`;
+}
+
+let gearSearchT;
+function bindGear() {
+  $("#openGear").addEventListener("click", () => openGear().catch((e) => toast(e.message, true)));
+  $("#gearClose").addEventListener("click", () => $("#gearDlg").close());
+  $("#addGuitar").addEventListener("click", () => {
+    S.gear.guitars.push({ name: "", config: "", pickups: {}, tuning: "standard (E)", notes: "" });
+    renderGear();
+    $$("#gearList [data-g=name]").slice(-1)[0]?.focus();
+  });
+  $("#gearList").addEventListener("click", (e) => {
+    if (e.target.dataset.rmGuitar !== undefined) { S.gear.guitars.splice(+e.target.dataset.rmGuitar, 1); renderGear(); }
+  });
+  $("#gearList").addEventListener("input", (e) => {
+    const card = e.target.closest(".guitar-card");
+    if (!card) return;
+    const gt = S.gear.guitars[+card.dataset.i];
+    if (e.target.dataset.g) gt[e.target.dataset.g] = e.target.value;
+    if (e.target.dataset.pk) { gt.pickups = gt.pickups || {}; gt.pickups[e.target.dataset.pk] = e.target.value; }
+    const q = e.target.value.trim();
+    const kind = e.target.dataset.g === "name" ? "guitar" : e.target.dataset.pk ? "pickup" : "";
+    if (!kind || q.length < 2) return;
+    clearTimeout(gearSearchT);
+    gearSearchT = setTimeout(async () => {
+      try {
+        const res = await api("GET", `/api/gear/search?kind=${kind}&q=${encodeURIComponent(q)}`);
+        $(kind === "guitar" ? "#guitarOptions" : "#pickupOptions").innerHTML =
+          res.map((r) => `<option value="${esc(r.name)}">${esc(r.description)}</option>`).join("");
+        if (kind === "guitar") {
+          const hit = res.find((r) => r.name === q);
+          if (hit) gt.wikidata_id = hit.wikidata_id;
+        }
+      } catch {}
+    }, 300);
+  });
+  $("#gearList").addEventListener("change", (e) => {
+    const card = e.target.closest(".guitar-card");
+    if (card && e.target.dataset.g === "config") { S.gear.guitars[+card.dataset.i].config = e.target.value; renderGear(); }
+  });
+  $("#gearSave").addEventListener("click", async () => {
+    S.gear.other = $("#gearOther").value;
+    S.gear.guitars = S.gear.guitars.filter((g) => g.name.trim());
+    try {
+      const { configs, ...body } = S.gear;
+      await busy("Salvo…", () => api("PUT", "/api/gear", body));
+      $("#gearDlg").close();
+      toast("Strumentazione salvata");
+    } catch {}
+  });
+}
+
+/* ---------------------------------------------------------------- import scaletta e automazioni */
+
+async function openImport() {
+  $("#importText").value = "";
+  $("#spotifyLink").value = "";
+  $("#importName").value = "";
+  $("#importAppend").checked = false;
+  const st = await api("GET", "/api/spotify/status");
+  $("#spotifyConnect").textContent = st.connected ? "Ricollega" : "Collega Spotify";
+  $("#spotifyConnect").disabled = !st.client_id;
+  $("#spotifyStatus").textContent = !st.client_id
+    ? "Per usare Spotify inserisci prima il Client ID in Impostazioni > Spotify. Intanto puoi incollare un elenco qui sotto."
+    : st.connected ? "Spotify collegato: scegli una playlist." : "Premi Collega Spotify e autorizza l'accesso alle tue playlist.";
+  const sel = $("#spotifyPlaylists");
+  sel.innerHTML = `<option value="">Scegli una tua playlist…</option>`;
+  if (st.connected) {
+    try {
+      const pls = await api("GET", "/api/spotify/playlists");
+      sel.innerHTML += pls.map((p) => `<option value="${esc(p.id)}">${esc(p.name)}${p.count ? ` (${p.count})` : ""}</option>`).join("");
+    } catch (e) { $("#spotifyStatus").textContent = e.message; }
+  }
+  $("#importDlg").showModal();
+}
+
+async function runImport() {
+  const playlist = $("#spotifyLink").value.trim() || $("#spotifyPlaylists").value;
+  const text = $("#importText").value.trim();
+  if (!playlist && !text) { toast("Scegli una playlist o incolla un elenco", true); return; }
+  const body = { playlist, text, name: $("#importName").value.trim() || ($("#spotifyPlaylists").selectedOptions[0]?.textContent.replace(/ \(\d+\)$/, "") || ""),
+    setlist_id: $("#importAppend").checked ? S.setlist.id : "" };
+  if (!playlist) body.name = body.name.startsWith("Scegli") ? "" : body.name;
+  try {
+    const data = await busy("Importo i brani…", () => api("POST", "/api/setlists/import", body));
+    $("#importDlg").close();
+    await loadSetlists(data.id);
+    toast(`${data.songs.length} brani nella scaletta "${data.name}"`);
+  } catch {}
+}
+
+async function suggestGuitars() {
+  try {
+    S.setlist = await busy("Scelgo la chitarra per ogni brano…", () => api("POST", `/api/setlists/${S.setlist.id}/suggest-guitars`));
+    renderSongs();
+    openSong(Math.max(0, S.songIdx));
+    toast("Chitarre proposte: le trovi in Progetta, campo Chitarra");
+  } catch {}
+}
+
+async function designAll() {
+  const missing = S.setlist.songs.filter((s) => !s.recipe).length;
+  if (!missing) { toast("Tutti i brani hanno già un preset"); return; }
+  if (!confirm(`Creo i preset per ${missing} brani, uno dopo l'altro (circa 1 minuto a brano). Procedo?`)) return;
+  await api("POST", `/api/setlists/${S.setlist.id}/design-all`, {});
+  $("#busyText").textContent = "Avvio…";
+  $("#busy").classList.remove("hidden");
+  const poll = async () => {
+    let j;
+    try { j = await api("GET", `/api/setlists/${S.setlist.id}/design-all`); } catch (e) { j = { running: false, errors: [e.message] }; }
+    if (j.running) {
+      $("#busyText").textContent = `Creo i preset: ${j.done} di ${j.total}${j.current ? " — " + j.current : ""}`;
+      setTimeout(poll, 2000);
+      return;
+    }
+    $("#busy").classList.add("hidden");
+    await openSetlist(S.setlist.id);
+    toast(j.errors?.length ? `Fatto, ${j.errors.length} brani non riusciti: ${j.errors[0]}` : "Preset creati per tutta la scaletta", !!j.errors?.length);
+  };
+  poll();
+}
+
+function bindSetlistTools() {
+  $("#openImport").addEventListener("click", () => openImport().catch((e) => toast(e.message, true)));
+  $("#importClose").addEventListener("click", () => $("#importDlg").close());
+  $("#importRun").addEventListener("click", runImport);
+  $("#spotifyConnect").addEventListener("click", () => { location.href = "/api/spotify/login"; });
+  $("#suggestGuitars").addEventListener("click", suggestGuitars);
+  $("#designAll").addEventListener("click", () => designAll().catch((e) => toast(e.message, true)));
 }
 
 /* ---------------------------------------------------------------- avvio */
@@ -1019,6 +1183,8 @@ function bindAll() {
 
   bindPreset();
   bindMerge();
+  bindGear();
+  bindSetlistTools();
 }
 
 (async function init() {
@@ -1026,6 +1192,12 @@ function bindAll() {
   try {
     await loadStatus();
     await loadSetlists();
+    const sp = new URLSearchParams(location.search).get("spotify");
+    if (sp) {
+      history.replaceState(null, "", "/");
+      if (sp === "ok") { toast("Spotify collegato"); openImport(); }
+      else toast("Collegamento a Spotify non riuscito: controlla Client ID e Redirect URI", true);
+    }
   } catch (e) {
     toast(`Avvio non riuscito: ${e.message}`, true);
   }

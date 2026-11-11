@@ -78,6 +78,15 @@ brew install ffmpeg
 
 Al primo utilizzo Demucs scarica il modello (circa 80 MB). La separazione di un brano richiede da uno a qualche minuto, a seconda del computer.
 
+## Scaletta da Spotify e strumentazione
+
+- **Strumentazione** (pulsante in alto): inserisci le chitarre che usi, con configurazione e modelli dei pickup e accordatura. I modelli di chitarra si cercano su Wikidata (database pubblico di Wikimedia); per i pickup c'è un elenco dei modelli più diffusi, ma si può scrivere anche a mano.
+- **Importa scaletta**: da una playlist Spotify oppure incollando un elenco "Artista - Titolo" (va bene anche il CSV di Exportify).
+- **Proponi le chitarre**: per ogni brano l'AI sceglie la tua chitarra più adatta, i pickup per le varie parti e l'accordatura.
+- **Crea tutti i preset**: progetta in sequenza i preset dei brani che non ce l'hanno ancora.
+
+Per Spotify serve un'app personale gratuita: su [developer.spotify.com/dashboard](https://developer.spotify.com/dashboard) crea un'app (API: Web API) con Redirect URI `http://127.0.0.1:8765/api/spotify/callback` e incolla il Client ID in *Impostazioni > Spotify*. Le regole di Spotify (febbraio 2026) permettono di leggere solo le playlist create da te o di cui sei collaboratore, e il proprietario dell'app deve avere Premium. Se non vuoi creare l'app, incolla l'elenco dei brani.
+
 ## Prima configurazione
 
 Tutto da **Impostazioni** nell'app:

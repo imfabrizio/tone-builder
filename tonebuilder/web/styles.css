@@ -84,7 +84,7 @@ a { color: var(--lamp); }
 .btn.primary:hover { filter: brightness(1.07); }
 .btn.ghost { background: transparent; }
 .btn.big { padding: 11px 22px; font-size: 16px; }
-.btn.wide { width: 100%; }
+.btn.wide { width: 100%; white-space: normal; }
 .btn.icon { width: 34px; padding: 6px 0; font-size: 18px; }
 .btn:disabled { opacity: .45; cursor: not-allowed; }
 
@@ -325,3 +325,9 @@ legend { padding: 0 6px; font-weight: 700; }
   .topbar { flex-wrap: wrap; }
   .top-status { order: 3; flex-basis: 100%; font-size: 12px; gap: 4px 12px; }
 }
+
+/* strumentazione */
+.guitar-card { border: 1px solid var(--line); border-radius: var(--radius-m); padding: 12px; display: grid; gap: 10px; margin-bottom: 10px; background: var(--tolex); }
+.guitar-card .editor-head h3 { font-size: 15px; }
+code { background: var(--tolex); padding: 1px 5px; border-radius: 3px; font-size: 12px; }
+#guitarReason { margin: 2px 0 0; }

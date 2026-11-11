@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -27,7 +27,9 @@ from .backends import quad_cortex as qcb
 from .catalogs.helix import HelixCatalog
 from .catalogs.quadcortex import QCCatalog
 from .config import ProviderSettings, Settings, app_home, load_settings, public_view, save_settings
-from .designer import DesignRequest, describe_audio, design, edit
+from . import gear as gearmod
+from . import spotify
+from .designer import DesignRequest, describe_audio, design, edit, suggest_guitars
 from .importers import import_file
 from .merge import Pick, merge
 from .recipe import ToneRecipe
@@ -92,6 +94,7 @@ class SettingsIn(BaseModel):
     helix_output_dir: str | None = None
     qc_target_setlist_slot: str | None = None
     demucs_command: str | None = None
+    spotify_client_id: str | None = None
 
 
 @app.put("/api/settings")
@@ -107,7 +110,8 @@ def update_settings(body: SettingsIn) -> dict[str, Any]:
         if vals.get("api_key"):  # campo vuoto = lascia la chiave esistente
             cur.api_key = vals["api_key"].strip()
         s.providers[name] = cur
-    for k in ("web_research", "ir_folders", "preset_folders", "helix_output_dir", "qc_target_setlist_slot", "demucs_command"):
+    for k in ("web_research", "ir_folders", "preset_folders", "helix_output_dir", "qc_target_setlist_slot", "demucs_command",
+              "spotify_client_id"):
         v = getattr(body, k)
         if v is not None:
             setattr(s, k, v)
@@ -251,6 +255,171 @@ def delete_setlist(sid: str) -> dict:
     return {"ok": True}
 
 
+# ------------------------------------------------------------------ strumentazione
+
+@app.get("/api/gear")
+def get_gear() -> dict:
+    g = gearmod.load_gear()
+    return {**g.model_dump(), "configs": gearmod.PICKUP_CONFIGS}
+
+
+@app.put("/api/gear")
+def put_gear(body: gearmod.GearStore) -> dict:
+    return gearmod.save_gear(body).model_dump()
+
+
+@app.get("/api/gear/search")
+def gear_search(q: str = "", kind: str = "guitar") -> list[dict]:
+    return gearmod.search_pickups(q) if kind == "pickup" else gearmod.search_guitars(q)
+
+
+# ------------------------------------------------------------------ scaletta: import e automazioni
+
+PORT = 8765
+
+
+@app.get("/api/spotify/status")
+def spotify_status() -> dict:
+    s = load_settings()
+    return {"client_id": bool(s.spotify_client_id), "connected": spotify.connected(),
+            "redirect_uri": spotify.redirect_uri(PORT)}
+
+
+@app.get("/api/spotify/login")
+def spotify_login():
+    try:
+        return RedirectResponse(spotify.login_url(load_settings().spotify_client_id, PORT))
+    except spotify.SpotifyError as e:
+        _err(e)
+
+
+@app.get("/api/spotify/callback")
+def spotify_callback(code: str = "", state: str = "", error: str = ""):
+    if error:
+        return RedirectResponse(f"/?spotify=errore&msg={error}")
+    try:
+        spotify.finish_login(load_settings().spotify_client_id, code, state, PORT)
+    except spotify.SpotifyError as e:
+        print(f"[errore] {e}", flush=True)
+        return RedirectResponse("/?spotify=errore")
+    return RedirectResponse("/?spotify=ok")
+
+
+@app.get("/api/spotify/playlists")
+def spotify_playlists() -> list[dict]:
+    try:
+        return spotify.my_playlists()
+    except Exception as e:
+        _err(e)
+
+
+class SetlistImportIn(BaseModel):
+    playlist: str = ""  # link o id della playlist Spotify
+    text: str = ""  # oppure elenco incollato
+    name: str = ""
+    setlist_id: str = ""  # se presente, aggiunge i brani a questa scaletta
+
+
+@app.post("/api/setlists/import")
+def import_setlist(body: SetlistImportIn) -> dict:
+    try:
+        if body.playlist.strip():
+            pname, tracks = spotify.playlist_tracks(body.playlist)
+        else:
+            pname, tracks = body.name or "Scaletta importata", spotify.parse_text_list(body.text)
+    except Exception as e:
+        _err(e)
+    if not tracks:
+        _err(ValueError("Nessun brano trovato"))
+    songs = [{"id": uuid.uuid4().hex[:8], "title": t["title"], "artist": t.get("artist", ""),
+              "request": {}, "audio": None, "recipe": None, "research": "", "sources": [], "links": [],
+              "warnings": [], "chat": []} for t in tracks]
+    if body.setlist_id:
+        data = get_setlist(body.setlist_id)
+        data["songs"].extend(songs)
+    else:
+        data = {"id": uuid.uuid4().hex[:12], "name": body.name or pname, "songs": songs}
+    _setlist_path(data["id"]).write_text(json.dumps(data, ensure_ascii=False, indent=1), encoding="utf-8")
+    return data
+
+
+@app.post("/api/setlists/{sid}/suggest-guitars")
+def api_suggest_guitars(sid: str) -> dict:
+    data = get_setlist(sid)
+    text = gearmod.describe_for_ai(gearmod.load_gear())
+    try:
+        rows = suggest_guitars(data["songs"], text, _provider())
+    except AIError as e:
+        _err(e)
+    for r in rows:
+        song = data["songs"][r["index"]]
+        req = song.setdefault("request", {}) or {}
+        parts = [r["guitar"], f"pickup: {r['pickups']}" if r["pickups"] else "", f"accordatura: {r['tuning']}" if r["tuning"] else ""]
+        req["guitar"] = " — ".join(p for p in parts if p)
+        song["request"] = req
+        song["guitar_reason"] = (f"Nel disco: {r['original']}. " if r["original"] else "") + r["reason"]
+    _setlist_path(sid).write_text(json.dumps(data, ensure_ascii=False, indent=1), encoding="utf-8")
+    return data
+
+
+_jobs: dict[str, dict[str, Any]] = {}
+
+
+@app.post("/api/setlists/{sid}/design-all")
+def design_all(sid: str, body: dict | None = None) -> dict:
+    """Crea in background i preset di tutti i brani che non ce l'hanno."""
+    job = _jobs.get(sid)
+    if job and job.get("running"):
+        return job
+    data = get_setlist(sid)
+    todo = [i for i, s in enumerate(data["songs"]) if not s.get("recipe")]
+    default_desc = (body or {}).get("description") or ""
+    job = {"running": True, "done": 0, "total": len(todo), "current": "", "errors": []}
+    _jobs[sid] = job
+    prov = _provider()
+    settings = load_settings()
+    gear_text = gearmod.describe_for_ai(gearmod.load_gear())
+
+    def work() -> None:
+        try:
+            for n, i in enumerate(todo, 1):
+                cur = json.loads(_setlist_path(sid).read_text(encoding="utf-8"))
+                if i >= len(cur["songs"]) or cur["songs"][i].get("recipe"):
+                    continue
+                song = cur["songs"][i]
+                job["current"] = f"{song.get('artist', '')} - {song.get('title', '')}"
+                rq = song.get("request") or {}
+                req = DesignRequest(
+                    title=song.get("title", ""), artist=song.get("artist", ""),
+                    description=rq.get("description") or default_desc or "il suono di chitarra originale del brano, pronto per il live",
+                    guitar=rq.get("guitar", ""), snapshots=rq.get("snapshots", ""),
+                    gear_preferences=rq.get("gear_preferences", ""), gear=gear_text,
+                )
+                try:
+                    res = design(req, prov, web_research=settings.web_research)
+                    cur = json.loads(_setlist_path(sid).read_text(encoding="utf-8"))
+                    tgt = next((x for x in cur["songs"] if x.get("id") == song.get("id")), None)
+                    if tgt is not None:
+                        tgt.update({"recipe": res.recipe.model_dump(), "research": res.research, "sources": res.sources,
+                                    "warnings": res.warnings, "links": sources.search_links(req.artist, req.title)})
+                        tgt.setdefault("chat", []).append({"who": "ai", "text": f"Preset creato in automatico: {len(res.recipe.chain)} blocchi, {len(res.recipe.snapshots)} snapshot."})
+                        _setlist_path(sid).write_text(json.dumps(cur, ensure_ascii=False, indent=1), encoding="utf-8")
+                except Exception as e:
+                    job["errors"].append(f"{job['current']}: {e}")
+                    print(f"[errore] {job['current']}: {e}", flush=True)
+                job["done"] = n
+        finally:
+            job["running"] = False
+
+    threading.Thread(target=work, daemon=True).start()
+    return job
+
+
+@app.get("/api/setlists/{sid}/design-all")
+def design_all_status(sid: str) -> dict:
+    return _jobs.get(sid, {"running": False, "done": 0, "total": 0, "errors": []})
+
+
 # ------------------------------------------------------------------ audio
 
 @app.post("/api/audio/analyze")
@@ -324,7 +493,10 @@ def api_design(body: DesignIn) -> dict:
         if t.exists():
             audio_path = t.read_text(encoding="utf-8")
     try:
-        res = design(DesignRequest(**body.model_dump(exclude={"audio_id"})), _provider(),
+        req = DesignRequest(**body.model_dump(exclude={"audio_id"}))
+        if not req.gear:
+            req.gear = gearmod.describe_for_ai(gearmod.load_gear())
+        res = design(req, _provider(),
                      web_research=s.web_research, audio_path=audio_path)
     except AIError as e:
         _err(e)
@@ -527,6 +699,8 @@ def main() -> None:
     ap.add_argument("--port", type=int, default=8765)
     ap.add_argument("--no-browser", action="store_true")
     a = ap.parse_args()
+    global PORT
+    PORT = a.port
     url = f"http://127.0.0.1:{a.port}"
     if not a.no_browser:
         threading.Timer(1.2, lambda: webbrowser.open(url)).start()
