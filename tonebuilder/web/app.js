@@ -1826,7 +1826,7 @@ function renderAssign() {
   const songs = S.setlist.songs;
   const patches = songs.filter((x) => x.kind === "patch" && x.recipe);
   if (!patches.length) {
-    $("#assignCards").innerHTML = `<p class="hint">Non ci sono ancora patch generiche: creale con Riduci a patch generiche.</p>`;
+    $("#assignCards").innerHTML = `<p class="hint">Non ci sono ancora patch generiche: creale con Crea patch generiche.</p>`;
     $("#assignTable").innerHTML = "";
     $("#assignSuggested").disabled = true;
     return;
@@ -1891,6 +1891,7 @@ function bindSetlistTools() {
   $("#spotifyConnect").addEventListener("click", () => { location.href = "/api/spotify/login"; });
   $("#suggestGuitars").addEventListener("click", suggestGuitars);
   $("#openWhole").addEventListener("click", () => openWhole().catch((e) => toast(e.message, true)));
+  $("#wholeReduce").addEventListener("click", () => { $("#wholeDlg").close(); openReduce(); });
   $("#wholeAssign").addEventListener("click", () => { $("#wholeDlg").close(); openAssign().catch((e) => toast(e.message, true)); });
   $("#assignClose").addEventListener("click", () => $("#assignDlg").close());
   $("#assignSuggested").addEventListener("click", () => assignPatches(null, true).then(() => toast("Patch assegnate secondo la proposta")).catch((e) => toast(e.message, true)));

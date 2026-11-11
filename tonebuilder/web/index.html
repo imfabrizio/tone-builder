@@ -30,7 +30,7 @@
     <button class="btn wide ghost" id="openImport">Importa scaletta</button>
     <button class="btn wide ghost" id="ytAll">Ascolta i brani da YouTube</button>
     <button class="btn wide ghost" id="suggestGuitars">Proponi le chitarre</button>
-    <button class="btn wide ghost" id="openReduce">Riduci a patch generiche</button>
+    <button class="btn wide ghost" id="openReduce">Crea patch generiche</button>
     <button class="btn wide" id="openWhole">Tutta la scaletta</button>
     <button class="btn wide ghost" id="openMerge">Unisci suoni da più preset</button>
   </aside>
@@ -283,7 +283,7 @@
 
 <dialog id="reduceDlg" class="dlg wide">
   <div class="dlg-body">
-    <h2>Riduci a patch generiche</h2>
+    <h2>Crea patch generiche</h2>
     <p class="hint">Raggruppo i brani con suono simile e creo poche patch complete (due linee piene, più ampli dove serve, 6-8 snapshot) che li coprono tutti. Per ogni brano ti dico quale snapshot usare in strofa, ritornello e assolo. Se hai già ascoltato i brani da YouTube, la proposta è più precisa.</p>
     <div class="row">
       <div class="field" style="width:160px"><label for="reduceMax">Numero massimo di patch</label><input id="reduceMax" type="number" min="1" max="8" value="4"></div>
@@ -339,8 +339,9 @@
 
     <h3>Patch generiche</h3>
     <div class="row">
+      <button class="btn primary" id="wholeReduce">Crea patch generiche</button>
       <button class="btn" id="wholeAssign">Vedi le patch e assegnale ai brani</button>
-      <span class="hint">Per crearne di nuove usa Riduci a patch generiche: sostituiscono quelle attuali.</span>
+      <span class="hint">Poche patch complete che coprono tutta la scaletta; quelle nuove sostituiscono le attuali.</span>
     </div>
 
     <h3>File</h3>
