@@ -1418,6 +1418,7 @@ function openSettings() {
   $("#helixOut").value = st.helix_output_dir || "";
   $("#qcSlot").value = st.qc_target_setlist_slot || "";
   $("#irFolders").value = (st.ir_folders || []).join("\n");
+  checkIrFolders();
   $("#presetFolders").value = (st.preset_folders || []).join("\n");
   $("#demucsCmd").value = st.demucs_command || "";
   $("#spClientId").value = st.spotify_client_id || "";
@@ -1460,15 +1461,26 @@ async function saveSettings() {
     web_research: $("#webResearch").checked,
     helix_output_dir: $("#helixOut").value.trim(),
     qc_target_setlist_slot: $("#qcSlot").value.trim(),
-    ir_folders: $("#irFolders").value.split("\n").map((x) => x.trim()).filter(Boolean),
+    ir_folders: $("#irFolders").value.split("\n").map((x) => x.trim().replace(/^["']|["']$/g, "").trim()).filter(Boolean),
     preset_folders: $("#presetFolders").value.split("\n").map((x) => x.trim()).filter(Boolean),
     demucs_command: $("#demucsCmd").value.trim(),
     spotify_client_id: $("#spClientId").value.trim(),
   };
   await busy("Salvo…", () => api("PUT", "/api/settings", body));
   await loadStatus();
-  $("#settingsDlg").close();
-  toast("Impostazioni salvate");
+  try {
+    const ir = await api("GET", "/api/irs");
+    if (ir.folders.length && !ir.count) {
+      await checkIrFolders();  // resta aperto: si vede subito cosa non va nella cartella IR
+      toast("Impostazioni salvate, ma nella cartella IR non trovo file .wav: controlla il percorso", true);
+      return;
+    }
+    $("#settingsDlg").close();
+    toast(ir.count ? `Impostazioni salvate: ${ir.count} IR trovati` : "Impostazioni salvate");
+  } catch {
+    $("#settingsDlg").close();
+    toast("Impostazioni salvate");
+  }
 }
 
 /* ---------------------------------------------------------------- merge */
@@ -1863,6 +1875,19 @@ async function openAssign() {
   renderSongs();
   renderAssign();
   if (!$("#assignDlg").open) $("#assignDlg").showModal();
+}
+
+/* controllo delle cartelle IR: dice subito se le trova e quanti file ci sono */
+async function checkIrFolders() {
+  const el = $("#irStatus");
+  if (!el) return;
+  try {
+    const r = await api("GET", "/api/irs");
+    if (!r.folders.length) { el.textContent = "Nessuna cartella indicata: incolla il percorso della cartella con i tuoi IR e salva."; el.className = "hint bad"; return; }
+    el.innerHTML = r.status.map((x) => x.ok ? `✓ ${esc(x.folder)}: ${x.count} IR trovati`
+      : `✗ ${esc(x.folder)}: ${esc(x.problem)}`).join("<br>");
+    el.className = "hint " + (r.count ? "good" : "bad");
+  } catch { el.textContent = ""; }
 }
 
 /* tabella "cosa usa questo preset" */

@@ -796,7 +796,9 @@ def api_edit_many(sid: str, body: dict) -> dict:
 @app.get("/api/irs")
 def list_irs() -> dict:
     names = _ir_names()
-    return {"count": len(names), "names": names[:500], "folders": load_settings().ir_folders or []}
+    folders = load_settings().ir_folders or []
+    return {"count": len(names), "names": names[:500], "folders": folders,
+            "status": sources.folder_status(folders, "ir")}
 
 
 @app.get("/api/setlists/{sid}/overview")

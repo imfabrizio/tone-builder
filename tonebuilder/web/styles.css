@@ -421,3 +421,6 @@ code { background: var(--tolex); padding: 1px 5px; border-radius: 3px; font-size
 .jobbar .job .grow { flex: 1; }
 .busy-card { flex-wrap: wrap; }
 .busy-card .btn { margin-left: 8px; }
+
+.hint.good { color: var(--good); }
+.hint.bad { color: var(--bad, #e06c5a); }

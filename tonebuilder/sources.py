@@ -34,11 +34,31 @@ def _words(text: str) -> set[str]:
     return set(re.findall(r"[a-z0-9]+", text.lower()))
 
 
+def clean_folder(f: str) -> str:
+    """Ripulisce un percorso incollato da Esplora file ("Copia come percorso" aggiunge le virgolette)."""
+    return f.strip().strip('"').strip("'").strip()
+
+
+def folder_status(folders: list[str], kind: str = "ir") -> list[dict]:
+    """Per ogni cartella: esiste? quanti file utili contiene?"""
+    out = []
+    for f in folders:
+        root = Path(clean_folder(f)).expanduser()
+        if not root.is_dir():
+            out.append({"folder": f, "ok": False, "count": 0,
+                        "problem": "il file non esiste" if root.is_file() else "cartella non trovata"})
+            continue
+        n = len(scan([str(root)], kind))
+        out.append({"folder": f, "ok": n > 0, "count": n,
+                    "problem": "" if n else "nessun file .wav qui dentro (nemmeno nelle sottocartelle)"})
+    return out
+
+
 def scan(folders: list[str], kind: str) -> list[LocalResource]:
     exts = {".wav"} if kind == "ir" else {".hlx", ".hsp", ".json"}
     out = []
     for f in folders:
-        root = Path(f).expanduser()
+        root = Path(clean_folder(f)).expanduser()
         if not root.is_dir():
             continue
         for p in root.rglob("*"):

@@ -292,3 +292,11 @@ def test_diff_recipes(recipe):
     assert "knob" in types and "snap_enabled" in types
     assert b.id in d["blocks"] and [b.id, new.snapshots[0].name] in d["cells"]
     assert diff_recipes(recipe, recipe)["items"] == []
+
+
+def test_ir_folder_with_quotes(tmp_path):
+    from tonebuilder import sources
+    (tmp_path / "sub").mkdir()
+    (tmp_path / "sub" / "V30 4x12.wav").write_bytes(b"RIFF")
+    st = sources.folder_status([f'"{tmp_path}"', str(tmp_path / "manca")])
+    assert st[0]["ok"] and st[0]["count"] == 1 and not st[1]["ok"]
