@@ -644,6 +644,7 @@ def api_group_proposal(sid: str, body: GroupIn) -> dict:
         prop = planner.propose_groups(data["songs"], max(1, min(8, body.max_patches)), body.notes,
                                       gearmod.describe_for_ai(gearmod.load_gear()), _provider())
         prop["use_iridium"] = body.use_iridium
+        prop["user_notes"] = body.notes or ""
         return prop
     except AIError as e:
         _err(e)
@@ -689,7 +690,8 @@ def start_generic(sid: str, proposal: dict) -> dict:
                 break
             job["current"] = g["name"]
             try:
-                req = planner.generic_request(g, snapshot_songs, gear_text, bool(proposal.get("use_iridium")))
+                req = planner.generic_request(g, snapshot_songs, gear_text, bool(proposal.get("use_iridium")),
+                                              str(proposal.get("user_notes") or ""))
                 req.irs = ir_names
                 res = design(req, prov, web_research=False)
                 cur = _load_sl(sid)
@@ -981,6 +983,7 @@ def api_dialog_execute(body: ActionIn) -> dict:
         try:
             prop = planner.propose_groups(data["songs"], max(1, min(8, int(a.get("max_patches") or 4))),
                                           str(a.get("notes") or ""), gear_text, _provider())
+            prop["user_notes"] = str(a.get("notes") or "")
         except AIError as e:
             _err(e)
         return {"job": "generic", "proposal": prop, **start_generic(sid, prop)}

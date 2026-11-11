@@ -1265,6 +1265,9 @@ async function createGeneric() {
   try {
     await saveNow();
     S.reduceProposal.use_iridium = S.hasIridium && $("#reduceIridium").checked;
+    // le indicazioni e le richieste fatte in chat valgono anche per la costruzione di ogni patch
+    const said = (S.reduceChat || []).filter((m) => m.who === "me").map((m) => m.text);
+    S.reduceProposal.user_notes = [$("#reduceNotes").value.trim(), ...said].filter(Boolean).join("\n");
     await api("POST", `/api/setlists/${S.setlist.id}/generic-patches`, { proposal: S.reduceProposal });
     await pollJob("generic", "Creo le patch generiche");
     await openAssign();

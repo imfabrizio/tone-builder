@@ -135,7 +135,8 @@ def revise_groups(songs: list[dict], proposal: dict, history: list[dict], max_pa
     return {"reply": str(data.get("reply") or "Ok."), "proposal": cleaned, "go": go}
 
 
-def generic_request(group: dict, songs: list[dict], gear_text: str, use_iridium: bool = False) -> DesignRequest:
+def generic_request(group: dict, songs: list[dict], gear_text: str, use_iridium: bool = False,
+                    user_notes: str = "") -> DesignRequest:
     names = []
     analyses = []
     for r in group["songs"]:
@@ -146,6 +147,11 @@ def generic_request(group: dict, songs: list[dict], gear_text: str, use_iridium:
             short = re.sub(r"\s+", " ", a)[:600]
             analyses.append(f"{s.get('title', '')}: {short}")
     desc = (f"{group.get('description', '')}\nBRANI DA COPRIRE:\n" + "\n".join(names) + "\n" + GENERIC_RULES)
+    if user_notes.strip():
+        # le indicazioni del chitarrista valgono per ogni patch e prevalgono sulle regole generiche sopra
+        desc += ("\nINDICAZIONI DEL CHITARRISTA PER TUTTE LE PATCH (rispettale alla lettera; se contrastano con le regole "
+                 "qui sopra o con i nomi/numero di snapshot proposti, vincono queste; applica a questa patch le parti "
+                 f"che la riguardano, es. quelle per la sua chitarra):\n{user_notes.strip()[:6000]}")
     return DesignRequest(
         title=group["name"], artist="", description=desc, guitar=group.get("guitar", ""),
         snapshots=group.get("snapshots") or GENERIC_SNAPSHOTS, gear=gear_text,
