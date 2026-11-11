@@ -67,6 +67,20 @@ def propose_groups(songs: list[dict], max_patches: int, notes: str, gear_text: s
     return _clean_proposal(data, songs, max_patches)
 
 
+REVISE_PROMPT = """Sei il tecnico di palco di un chitarrista e state decidendo insieme come ridurre la scaletta a
+poche PATCH GENERICHE corpose. Ricevi la proposta attuale e la conversazione. Rispondi in italiano con frasi brevi e
+naturali (verranno anche lette ad alta voce), massimo 4 frasi.
+
+- Se il chitarrista chiede cambiamenti (spostare brani, unire o dividere patch, cambiare nome, snapshot, chitarra,
+  carattere del suono), aggiorna la proposta e spiega in breve cosa hai cambiato.
+- Se fa una domanda, rispondi e lascia la proposta com'e'.
+- Se da' un ok esplicito per creare le patch ("ok", "vai", "procedi", "creale"), metti "go": true.
+Mantieni sempre ogni brano in una sola patch e rispetta il numero massimo di patch, salvo che lui chieda di cambiarlo.
+Le patch restano corpose: due linee piene, 12-16 blocchi, 6-8 snapshot.
+
+Rispondi SOLO in JSON: {"reply": "...", "go": false, "proposal": {"patches": [...stesso formato...], "notes": "..."}}"""
+
+
 def _clean_proposal(data: dict, songs: list[dict], max_patches: int) -> dict:
     valid = {i for i, s in enumerate(songs) if s.get("kind") != "patch"}
     seen: set[int] = set()
