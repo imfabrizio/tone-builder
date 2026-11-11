@@ -267,7 +267,7 @@ fieldset > .btn, .audio-box > .btn, .dlg-body > .btn { justify-self: start; }
 /* dialoghi */
 .dlg {
   border: 1px solid var(--line); border-radius: var(--radius-m); background: var(--tolex-2); color: var(--ink);
-  padding: 0; width: min(620px, 94vw); max-height: 90vh;
+  padding: 0; width: min(620px, 94vw); max-height: 90vh; overflow-y: auto;
 }
 .dlg.wide { width: min(900px, 96vw); }
 .dlg::backdrop { background: rgba(10,14,18,.6); }
@@ -349,3 +349,9 @@ code { background: var(--tolex); padding: 1px 5px; border-radius: 3px; font-size
 #reduceChat { max-height: 220px; overflow-y: auto; }
 #reduceTalkBtn.listening { background: var(--bad); border-color: var(--bad); color: #fff; animation: pulse 1.2s ease-in-out infinite; }
 #reduceTalkBtn.speaking { background: var(--good); border-color: var(--good); color: #10151a; }
+
+.iridium-table { width: 100%; border-collapse: collapse; font-size: 13px; margin: 8px 0; }
+.iridium-table th, .iridium-table td { text-align: left; padding: 6px; border-bottom: 1px solid var(--line); vertical-align: top; }
+.iridium-steps { padding-left: 20px; font-size: 14px; color: var(--ink-2); }
+.iridium-steps li { margin-bottom: 6px; }
+.guitar-card.reserve { opacity: .7; }

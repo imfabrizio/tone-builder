@@ -196,3 +196,19 @@ def test_group_revise_dialog(monkeypatch):
     r = c.post(f"/api/setlists/{sl['id']}/group-revise",
                json={"proposal": prop, "max_patches": 2, "history": [{"who": "me", "text": "ok creale"}]}).json()
     assert r["go"] is True
+
+
+def test_gear_export_import_and_iridium_guide(recipe):
+    import io
+    c = TestClient(srv.app)
+    data = {"guitars": [{"name": "Music Man JP6", "config": "HH + Piezo", "use": "acustici e pezzi duri"}],
+            "wah_external": True, "iridium": True, "iridium_midi_channel": 3, "iridium_first_preset": 40}
+    r = c.post("/api/gear/import", files={"file": ("g.json", io.BytesIO(json.dumps(data).encode()), "application/json")},
+               data={"merge": "true"})
+    assert r.status_code == 200 and r.json()["iridium_midi_channel"] == 3
+    assert "acustici" in c.get("/api/gear/export").text
+    rec = recipe.model_dump()
+    rec["iridium"] = {"enabled": True, "midi_channel": 3, "first_preset": 40,
+                      "snapshots": [{"snapshot": s["name"], "amp": "Chime"} for s in rec["snapshots"]]}
+    g = c.post("/api/iridium/guide", json={"recipe": rec}).json()
+    assert g["enabled"] and g["rows"][0]["preset"] == 40 and "Vox" in g["rows"][0]["amp"]

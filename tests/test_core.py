@@ -250,3 +250,31 @@ def test_merge_respects_amp_limit():
     r = merge(picks, accept="all")
     for ln in (1, 2):
         assert sum(1 for b in r.recipe.chain if b.line == ln and b.role == Role.amp) <= 2
+
+
+def test_iridium_replaces_amp_and_cab_on_helix(recipe):
+    from tonebuilder.recipe import IridiumPlan, IridiumSnapshot
+
+    recipe.iridium = IridiumPlan(enabled=True, midi_channel=2, first_preset=20,
+                                 snapshots=[IridiumSnapshot(snapshot=s.name, amp="punch", cab="b") for s in recipe.snapshots])
+    b = hx.build_spec(recipe)
+    blocks = [x["block"] for x in b.spec["paths"][0]["blocks"]]
+    assert blocks[1].startswith("HD2_FXLoop") and "Agoura_AmpBrit2203MV" not in blocks
+    cmds = b.spec["commands"]
+    assert cmds[0] == {"switch": "FS1", "command": "snapshot", "snapshot": 0, "label": "Strofa"}
+    assert cmds[1]["program"] == 20 and cmds[1]["channel"] == 2
+    assert b.spec["footswitches"][0]["switch"] == "FS10"  # spostato per lasciare posto agli snapshot
+    parse_spec(b.spec)
+    assert recipe.iridium.snapshots[0].amp == "Punch" and recipe.iridium.snapshots[0].cab == "B"
+
+
+def test_wah_removed_when_external(recipe, monkeypatch):
+    from tonebuilder import gear
+    from tonebuilder.designer import apply_gear_rules
+
+    monkeypatch.setattr(gear, "load_gear", lambda: gear.GearStore(wah_external=True))
+    recipe.chain.append(Block(id="wah1", role=Role.wah))
+    recipe.snapshots[0].enabled["wah1"] = True
+    notes = apply_gear_rules(recipe)
+    assert not any(b.role == Role.wah for b in recipe.chain) and notes
+    assert "wah1" not in recipe.snapshots[0].enabled

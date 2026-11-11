@@ -270,6 +270,42 @@ def put_gear(body: gearmod.GearStore) -> dict:
     return gearmod.save_gear(body).model_dump()
 
 
+@app.get("/api/gear/export")
+def gear_export():
+    p = app_home() / "gear.json"
+    gearmod.save_gear(gearmod.load_gear())
+    return FileResponse(p, filename="strumentazione-tone-builder.json", media_type="application/json")
+
+
+@app.post("/api/gear/import")
+async def gear_import(file: UploadFile = File(...), merge: bool = Form(default=True)) -> dict:
+    try:
+        new = gearmod.GearStore.model_validate(json.loads((await file.read()).decode("utf-8")))
+    except Exception as e:
+        _err(ValueError(f"File di strumentazione non valido: {e}"))
+    if merge:
+        cur = gearmod.load_gear()
+        names = {g.name.lower() for g in cur.guitars}
+        cur.guitars += [g for g in new.guitars if g.name.lower() not in names]
+        for k in ("wah_external", "iridium", "iridium_midi_channel", "iridium_first_preset"):
+            setattr(cur, k, getattr(new, k))
+        if new.other:
+            cur.other = new.other
+        new = cur
+    return gearmod.save_gear(new).model_dump()
+
+
+@app.post("/api/iridium/guide")
+def iridium_guide(body: dict) -> dict:
+    from . import iridium
+
+    try:
+        r = ToneRecipe.model_validate(body.get("recipe") or {})
+    except Exception as e:
+        _err(e)
+    return iridium.guide(r)
+
+
 @app.get("/api/gear/search")
 def gear_search(q: str = "", kind: str = "guitar") -> list[dict]:
     return gearmod.search_pickups(q) if kind == "pickup" else gearmod.search_guitars(q)
@@ -508,14 +544,17 @@ def api_youtube(sid: str) -> dict:
 class GroupIn(BaseModel):
     max_patches: int = 4
     notes: str = ""
+    use_iridium: bool = False
 
 
 @app.post("/api/setlists/{sid}/group-proposal")
 def api_group_proposal(sid: str, body: GroupIn) -> dict:
     data = get_setlist(sid)
     try:
-        return planner.propose_groups(data["songs"], max(1, min(8, body.max_patches)), body.notes,
+        prop = planner.propose_groups(data["songs"], max(1, min(8, body.max_patches)), body.notes,
                                       gearmod.describe_for_ai(gearmod.load_gear()), _provider())
+        prop["use_iridium"] = body.use_iridium
+        return prop
     except AIError as e:
         _err(e)
 
@@ -555,7 +594,7 @@ def start_generic(sid: str, proposal: dict) -> dict:
         for n, g in enumerate(groups, 1):
             job["current"] = g["name"]
             try:
-                req = planner.generic_request(g, snapshot_songs, gear_text)
+                req = planner.generic_request(g, snapshot_songs, gear_text, bool(proposal.get("use_iridium")))
                 res = design(req, prov, web_research=False)
                 cur = _load_sl(sid)
                 pid = uuid.uuid4().hex[:8]

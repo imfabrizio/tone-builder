@@ -19,7 +19,7 @@ from pydantic import BaseModel, Field
 
 from .config import app_home
 
-PICKUP_CONFIGS = ["SSS", "HSS", "HSH", "HH", "SS", "H", "P90", "P90 P90", "Mini-HH", "Piezo", "Altro"]
+PICKUP_CONFIGS = ["SSS", "HSS", "HSH", "HH", "HH + Piezo", "SS", "H", "P90", "P90 P90", "Mini-HH", "Piezo", "Altro"]
 
 # modello -> (tipo, carattere): elenco curato dei pickup piu' diffusi
 PICKUPS: dict[str, tuple[str, str]] = {
@@ -77,6 +77,16 @@ PICKUPS: dict[str, tuple[str, str]] = {
     "Ibanez Quantum": ("humbucker", "output medio-alto"),
     "Rickenbacker Toaster": ("single", "jangle chiaro"),
     "Gretsch Filter'Tron": ("humbucker", "chiaro, twang"),
+    "Suhr ML": ("single", "silenzioso, vintage, disegnato con Michael Landau"),
+    "Suhr V60LP": ("single", "vintage, chiaro"),
+    "Seymour Duncan Jeff Beck (TB-4/SH-4 JB)": ("humbucker", "output alto, medie avanti, rock"),
+    "DiMarzio custom JP6 manico (base Air Norton)": ("humbucker", "caldo, morbido, lead fluido"),
+    "DiMarzio custom JP6 ponte (base Steve's Special)": ("humbucker", "output alto, medie aggressive"),
+    "DiMarzio LiquiFire (DP280)": ("humbucker", "manico, caldo"),
+    "DiMarzio Crunch Lab (DP228)": ("humbucker", "ponte, output alto, moderno"),
+    "DiMarzio Steve's Special (DP161)": ("humbucker", "output alto, medie aggressive"),
+    "DiMarzio D Sonic (DP207)": ("humbucker", "output alto, moderno"),
+    "Piezo Music Man / Graph Tech": ("piezo", "suono acustico dal ponte"),
     "Gibson Mini-humbucker": ("mini-humbucker", "chiaro"),
 }
 
@@ -88,13 +98,19 @@ class Guitar(BaseModel):
     config: str = ""  # es. HSS
     pickups: dict[str, str] = Field(default_factory=dict)  # posizione -> modello (manico/centrale/ponte)
     tuning: str = "standard (E)"
+    use: str = ""  # quando usarla, es. "pezzi pop e puliti"
+    active: bool = True  # False = di riserva, l'AI non la propone
     notes: str = ""
 
 
 class GearStore(BaseModel):
     guitars: list[Guitar] = Field(default_factory=list)
     devices: list[str] = Field(default_factory=lambda: ["Helix Stadium", "Quad Cortex"])
-    other: str = ""  # altro: pedali reali, ampli, wah esterni...
+    other: str = ""  # altro: pedali reali, ampli...
+    wah_external: bool = False  # wah esterno: mai blocchi wah nei preset
+    iridium: bool = False  # Strymon Iridium disponibile (loop effetti dello Stadium)
+    iridium_midi_channel: int = Field(1, ge=1, le=16)
+    iridium_first_preset: int = Field(10, ge=0, le=119)
 
 
 def _path():
@@ -124,7 +140,12 @@ def describe_for_ai(g: GearStore) -> str:
     for gt in g.guitars:
         pk = ", ".join(f"{pos}: {model} ({PICKUPS.get(model, ('', ''))[1] or 'n.d.'})" for pos, model in gt.pickups.items() if model)
         lines.append(f"- {gt.name}" + (f" [{gt.config}]" if gt.config else "") + (f"; pickup {pk}" if pk else "")
-                     + f"; accordatura {gt.tuning}" + (f"; note: {gt.notes}" if gt.notes else ""))
+                     + f"; accordatura {gt.tuning}" + (f"; da usare per: {gt.use}" if gt.use else "")
+                     + ("" if gt.active else "; DI RISERVA, non proporla") + (f"; note: {gt.notes}" if gt.notes else ""))
+    if g.wah_external:
+        lines.append("- Wah esterno sulle pedaliere: nei preset NON vanno mai blocchi wah")
+    if g.iridium:
+        lines.append("- Strymon Iridium disponibile come ampli/cab esterno nel loop effetti dello Stadium")
     if g.other:
         lines.append(f"- Altro: {g.other}")
     return "\n".join(lines)

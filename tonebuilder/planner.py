@@ -27,17 +27,24 @@ non un compromesso povero. Regole:
 - nelle notes scrivi per OGNI brano quale snapshot usare in strofa, ritornello e assolo.
 """
 
-GROUP_PROMPT = """Sei il tecnico di palco di un chitarrista. Devi ridurre la scaletta a poche PATCH GENERICHE:
-raggruppa i brani con suono di chitarra simile (stesso genere di ampli, gain, effetti tipici, accordatura),
-in modo che ogni patch, ricca di snapshot, copra bene tutti i suoi brani.
-Rispetta il numero massimo di patch indicato. Brani con accordatura diversa vanno in patch separate solo se serve.
+GROUP_PROMPT = """Sei il tecnico di palco di un chitarrista. Devi ridurre la scaletta a poche PATCH GENERICHE corpose.
+Procedi in due passi:
+1. CHITARRA: se l'utente ha indicato le sue chitarre, assegna a ogni brano la chitarra con cui suonarlo, rispettando il
+   campo "da usare per" di ogni chitarra (e' la sua scelta) e non proponendo mai le chitarre di riserva. Cerca la
+   continuita': non far cambiare chitarra senza una necessita' vera (parti acustiche che servono il piezo, distorsioni
+   che i single coil non reggono, accordature diverse). Una chitarra con piezo e humbucker copre sia acustici sia
+   distorti.
+2. PATCH: raggruppa i brani per suono SOLO tra brani con la stessa chitarra: ogni patch usa UNA sola chitarra (non si
+   cambia chitarra dentro una patch, perche' volumi e pickup cambiano tutto). Ogni patch, ricca di snapshot, deve coprire
+   bene tutti i suoi brani.
+Rispetta il numero massimo di patch indicato.
 
 Rispondi in JSON:
 {"patches": [{"name": "nome breve (max 24 caratteri)", "description": "il suono della patch e cosa deve coprire",
   "snapshots": "elenco dei nomi degli snapshot separati da virgola",
-  "guitar": "chitarra consigliata tra quelle dell'utente, se indicate",
+  "guitar": "nome esatto della chitarra dell'utente usata in tutta la patch",
   "songs": [{"index": 0, "usage": "es. strofa Crunch, ritornello Ritmica piena, assolo Lead"}]}],
- "notes": "una frase su come hai ragionato"}
+ "notes": "una frase su come hai ragionato (chitarre e gruppi)"}
 Ogni brano deve stare in una sola patch. Scrivi in italiano."""
 
 
@@ -76,6 +83,7 @@ naturali (verranno anche lette ad alta voce), massimo 4 frasi.
 - Se fa una domanda, rispondi e lascia la proposta com'e'.
 - Se da' un ok esplicito per creare le patch ("ok", "vai", "procedi", "creale"), metti "go": true.
 Mantieni sempre ogni brano in una sola patch e rispetta il numero massimo di patch, salvo che lui chieda di cambiarlo.
+Ogni patch usa una sola chitarra; segui il criterio del chitarrista su quale chitarra usare per cosa e la continuita'.
 Le patch restano corpose: due linee piene, 12-16 blocchi, 6-8 snapshot.
 
 Rispondi SOLO in JSON: {"reply": "...", "go": false, "proposal": {"patches": [...stesso formato...], "notes": "..."}}"""
@@ -127,7 +135,7 @@ def revise_groups(songs: list[dict], proposal: dict, history: list[dict], max_pa
     return {"reply": str(data.get("reply") or "Ok."), "proposal": cleaned, "go": go}
 
 
-def generic_request(group: dict, songs: list[dict], gear_text: str) -> DesignRequest:
+def generic_request(group: dict, songs: list[dict], gear_text: str, use_iridium: bool = False) -> DesignRequest:
     names = []
     analyses = []
     for r in group["songs"]:
@@ -141,7 +149,7 @@ def generic_request(group: dict, songs: list[dict], gear_text: str) -> DesignReq
     return DesignRequest(
         title=group["name"], artist="", description=desc, guitar=group.get("guitar", ""),
         snapshots=group.get("snapshots") or GENERIC_SNAPSHOTS, gear=gear_text,
-        audio_analysis="\n".join(analyses)[:6000],
+        audio_analysis="\n".join(analyses)[:6000], use_iridium=use_iridium,
     )
 
 

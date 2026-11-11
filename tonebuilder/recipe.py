@@ -40,6 +40,7 @@ class Role(str, Enum):
     filter = "filter"
     synth = "synth"
     looper = "looper"
+    fxloop = "fxloop"  # loop effetti verso un pedale esterno (es. Strymon Iridium)
     other = "other"
 
 
@@ -108,6 +109,49 @@ class GuitarInfo(BaseModel):
     pickups: str = ""
 
 
+IRIDIUM_AMPS = ("Round", "Chime", "Punch")  # Fender Deluxe Reverb, Vox AC30, Marshall Plexi
+
+
+class IridiumSnapshot(BaseModel):
+    """Impostazioni del preset Iridium richiamato da uno snapshot."""
+
+    snapshot: str  # nome dello snapshot
+    amp: str = "Round"  # Round | Chime | Punch
+    cab: str = "A"  # A | B | C
+    drive: float = 5
+    bass: float = 5
+    middle: float = 5
+    treble: float = 5
+    level: float = 5
+    room: float = 2
+    notes: str = ""
+
+    @field_validator("amp")
+    @classmethod
+    def _amp_ok(cls, v: str) -> str:
+        for a in IRIDIUM_AMPS:
+            if a.lower() == v.strip().lower():
+                return a
+        raise ValueError(f"ampli Iridium sconosciuto: {v} (usa Round, Chime o Punch)")
+
+    @field_validator("cab")
+    @classmethod
+    def _cab_ok(cls, v: str) -> str:
+        v = v.strip().upper()[:1]
+        if v not in ("A", "B", "C"):
+            raise ValueError("cab Iridium: A, B o C")
+        return v
+
+
+class IridiumPlan(BaseModel):
+    """Ampli e cab della linea 1 fatti dallo Strymon Iridium nel loop effetti (solo Helix)."""
+
+    enabled: bool = False
+    midi_channel: int = Field(1, ge=1, le=16)
+    first_preset: int = Field(10, ge=0, le=119)  # preset Iridium del primo snapshot; gli altri a seguire
+    snapshots: list[IridiumSnapshot] = Field(default_factory=list)
+
+
 class ToneRecipe(BaseModel):
     name: str
     song: SongInfo = Field(default_factory=SongInfo)
@@ -117,6 +161,7 @@ class ToneRecipe(BaseModel):
     snapshots: list[Snapshot] = Field(default_factory=list)
     footswitches: list[Footswitch] = Field(default_factory=list)
     notes: list[str] = Field(default_factory=list)  # note per il chitarrista
+    iridium: IridiumPlan | None = None
 
     @model_validator(mode="after")
     def _refs_valid(self) -> "ToneRecipe":

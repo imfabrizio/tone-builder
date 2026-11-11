@@ -190,6 +190,7 @@ function openSong(i) {
   $("#reqDescription").value = rq.description || "";
   $("#reqGuitar").value = rq.guitar || "";
   $("#reqPrefs").value = rq.gear_preferences || "";
+  $("#reqIridium").checked = !!rq.use_iridium;
   $("#reqSnapshots").value = rq.snapshots || "";
   $("#guitarReason").textContent = s.guitar_reason || "";
   renderAnalysis();
@@ -215,6 +216,7 @@ function readRequest() {
     description: $("#reqDescription").value.trim(),
     guitar: $("#reqGuitar").value.trim(),
     gear_preferences: $("#reqPrefs").value.trim(),
+    use_iridium: S.hasIridium && $("#reqIridium").checked,
     snapshots: $("#reqSnapshots").value.trim(),
   };
 }
@@ -308,9 +310,29 @@ function renderPatchInfo() {
   } else box.classList.add("hidden");
 }
 
+async function renderIridium() {
+  const r = recipe();
+  const box = $("#iridiumBox");
+  if (!r?.iridium) { box.classList.add("hidden"); return; }
+  box.classList.remove("hidden");
+  $("#iridiumOn").checked = !!r.iridium.enabled;
+  if (!r.iridium.enabled) { $("#iridiumGuide").innerHTML = ""; return; }
+  try {
+    const g = await api("POST", "/api/iridium/guide", { recipe: r });
+    if (!g.enabled) { $("#iridiumGuide").innerHTML = ""; return; }
+    $("#iridiumGuide").innerHTML = `
+      <table class="iridium-table"><tr><th>Snapshot</th><th>Preset Iridium</th><th>Ampli</th><th>Cab</th><th>Manopole</th></tr>
+      ${g.rows.map((x) => `<tr><td>${esc(x.snapshot)}</td><td>${x.preset}</td><td>${esc(x.amp)}</td><td>${esc(x.cab)}</td>
+        <td>${esc(x.knobs)}${x.notes ? `<div class="hint">${esc(x.notes)}</div>` : ""}</td></tr>`).join("")}</table>
+      <details><summary>Guida passo passo: collegamenti, livelli e MIDI</summary>
+      <ol class="iridium-steps">${g.steps.map((t) => `<li>${esc(t)}</li>`).join("")}</ol></details>`;
+  } catch (e) { $("#iridiumGuide").innerHTML = `<p class="hint">${esc(e.message)}</p>`; }
+}
+
 function renderPreset() {
   const r = recipe();
   renderPatchInfo();
+  renderIridium();
   $("#noPreset").classList.toggle("hidden", !!r || !!song()?.uses_patch);
   $("#presetBody").classList.toggle("hidden", !r);
   if (!r) return;
@@ -391,7 +413,7 @@ function renderBlockEditor() {
   ed.classList.remove("hidden");
   const fs = (r.footswitches || []).find((f) => f.block_id === b.id);
   const roles = Object.keys(ROLE_IT).map((k) => `<option value="${k}" ${k === b.role ? "selected" : ""}>${ROLE_IT[k]}</option>`).join("");
-  const fsOpts = ["", ...Array.from({ length: 10 }, (_, i) => `FS${i + 1}`)]
+  const fsOpts = ["", "FS1", "FS2", "FS3", "FS4", "FS5", "FS7", "FS8", "FS9", "FS10", "FS11"]
     .map((f) => `<option value="${f}" ${fs?.switch === f ? "selected" : ""}>${f || "Nessuno"}</option>`).join("");
   ed.innerHTML = `
     <div class="editor-head">
@@ -948,7 +970,7 @@ function openReduce() {
 async function makeProposal(notes) {
   await saveNow();
   S.reduceProposal = await api("POST", `/api/setlists/${S.setlist.id}/group-proposal`,
-    { max_patches: +$("#reduceMax").value || 4, notes });
+    { max_patches: +$("#reduceMax").value || 4, notes, use_iridium: S.hasIridium && $("#reduceIridium").checked });
   renderProposal();
 }
 
@@ -1005,6 +1027,7 @@ async function createGeneric() {
   $("#reduceDlg").close();
   try {
     await saveNow();
+    S.reduceProposal.use_iridium = S.hasIridium && $("#reduceIridium").checked;
     await api("POST", `/api/setlists/${S.setlist.id}/generic-patches`, { proposal: S.reduceProposal });
     await pollJob("generic", "Creo le patch generiche");
   } catch (e) { toast(e.message, true); }
@@ -1313,7 +1336,7 @@ function bindMerge() {
 
 /* ---------------------------------------------------------------- strumentazione */
 
-const POSITIONS = { SSS: ["manico", "centrale", "ponte"], HSS: ["manico", "centrale", "ponte"], HSH: ["manico", "centrale", "ponte"],
+const POSITIONS = { "HH + Piezo": ["manico", "ponte", "piezo"], SSS: ["manico", "centrale", "ponte"], HSS: ["manico", "centrale", "ponte"], HSH: ["manico", "centrale", "ponte"],
   HH: ["manico", "ponte"], SS: ["manico", "ponte"], H: ["ponte"], P90: ["ponte"], "P90 P90": ["manico", "ponte"],
   "Mini-HH": ["manico", "ponte"], Piezo: ["piezo"], Altro: ["manico", "ponte"] };
 S.gear = null;
@@ -1322,6 +1345,10 @@ async function openGear() {
   S.gear = await api("GET", "/api/gear");
   renderGear();
   $("#gearOther").value = S.gear.other || "";
+  $("#gearWah").checked = !!S.gear.wah_external;
+  $("#gearIridium").checked = !!S.gear.iridium;
+  $("#gearIrCh").value = S.gear.iridium_midi_channel || 1;
+  $("#gearIrFirst").value = S.gear.iridium_first_preset ?? 10;
   $("#gearDlg").showModal();
 }
 
@@ -1329,7 +1356,7 @@ function renderGear() {
   const g = S.gear;
   $("#gearList").innerHTML = g.guitars.length ? g.guitars.map((gt, i) => {
     const pos = POSITIONS[gt.config] || ["manico", "ponte"];
-    return `<div class="guitar-card" data-i="${i}">
+    return `<div class="guitar-card ${gt.active === false ? "reserve" : ""}" data-i="${i}">
       <div class="editor-head"><h3>${esc(gt.name || "Nuova chitarra")}</h3><button class="btn ghost" data-rm-guitar="${i}">Rimuovi</button></div>
       <div class="editor-grid">
         <div class="field"><label>Modello</label><input data-g="name" list="guitarOptions" value="${esc(gt.name)}" placeholder="Es. Fender Stratocaster"></div>
@@ -1337,12 +1364,33 @@ function renderGear() {
         <div class="field"><label>Accordatura</label><input data-g="tuning" value="${esc(gt.tuning)}"></div>
         ${pos.map((p) => `<div class="field"><label>Pickup ${p}</label><input data-pk="${p}" list="pickupOptions" value="${esc(gt.pickups?.[p] || "")}" placeholder="Modello o descrizione"></div>`).join("")}
         <div class="field"><label>Note</label><input data-g="notes" value="${esc(gt.notes)}" placeholder="Es. corde 10-46, push-pull coil split"></div>
+        <div class="field" style="grid-column: span 2"><label>Da usare per</label><input data-g="use" value="${esc(gt.use || "")}" placeholder="Es. pezzi pop e puliti / acustici col piezo e pezzi duri"></div>
+        <label class="check"><input type="checkbox" data-g-active ${gt.active === false ? "" : "checked"}> In uso (togli la spunta se è di riserva)</label>
       </div></div>`;
   }).join("") : `<p class="hint">Nessuna chitarra ancora: aggiungi quelle che porti sul palco.</p>`;
 }
 
 let gearSearchT;
+function applyGearFlags(g) {
+  S.hasIridium = !!g?.iridium;
+  $$(".iridium-only").forEach((el) => el.classList.toggle("hidden", !S.hasIridium));
+}
+
 function bindGear() {
+  $("#gearImport").addEventListener("change", async (e) => {
+    const f = e.target.files[0];
+    e.target.value = "";
+    if (!f) return;
+    const fd = new FormData();
+    fd.append("file", f);
+    fd.append("merge", "true");
+    try {
+      await busy("Importo la strumentazione…", () => api("POST", "/api/gear/import", fd));
+      await openGear();
+      applyGearFlags(S.gear);
+      toast("Strumentazione importata");
+    } catch {}
+  });
   $("#openGear").addEventListener("click", () => openGear().catch((e) => toast(e.message, true)));
   $("#gearClose").addEventListener("click", () => $("#gearDlg").close());
   $("#addGuitar").addEventListener("click", () => {
@@ -1378,13 +1426,19 @@ function bindGear() {
   $("#gearList").addEventListener("change", (e) => {
     const card = e.target.closest(".guitar-card");
     if (card && e.target.dataset.g === "config") { S.gear.guitars[+card.dataset.i].config = e.target.value; renderGear(); }
+    if (card && e.target.matches("[data-g-active]")) { S.gear.guitars[+card.dataset.i].active = e.target.checked; renderGear(); }
   });
   $("#gearSave").addEventListener("click", async () => {
     S.gear.other = $("#gearOther").value;
+    S.gear.wah_external = $("#gearWah").checked;
+    S.gear.iridium = $("#gearIridium").checked;
+    S.gear.iridium_midi_channel = Math.min(16, Math.max(1, +$("#gearIrCh").value || 1));
+    S.gear.iridium_first_preset = Math.min(119, Math.max(0, +$("#gearIrFirst").value || 0));
     S.gear.guitars = S.gear.guitars.filter((g) => g.name.trim());
     try {
       const { configs, ...body } = S.gear;
       await busy("Salvo…", () => api("PUT", "/api/gear", body));
+      applyGearFlags(S.gear);
       $("#gearDlg").close();
       toast("Strumentazione salvata");
     } catch {}
@@ -1553,7 +1607,7 @@ function bindAll() {
     if (li) openSong(+li.dataset.i);
   });
 
-  ["#songTitle", "#songArtist", "#reqDescription", "#reqGuitar", "#reqPrefs", "#reqSnapshots"].forEach((s) =>
+  ["#songTitle", "#songArtist", "#reqDescription", "#reqGuitar", "#reqPrefs", "#reqSnapshots", "#reqIridium"].forEach((s) =>
     $(s).addEventListener("change", () => { readRequest(); renderSongs(); saveSoon(); }));
   $$(".tab").forEach((t) => t.addEventListener("click", () => switchTab(t.dataset.tab)));
 
@@ -1595,12 +1649,17 @@ function bindAll() {
   bindGear();
   bindSetlistTools();
   bindReduce();
+  $("#iridiumOn").addEventListener("change", (e) => {
+    const r = recipe();
+    if (r?.iridium) { r.iridium.enabled = e.target.checked; recipeChanged(); }
+  });
 }
 
 (async function init() {
   bindAll();
   try {
     await loadStatus();
+    try { applyGearFlags(await api("GET", "/api/gear")); } catch {}
     await loadSetlists();
     const sp = new URLSearchParams(location.search).get("spotify");
     if (sp) {

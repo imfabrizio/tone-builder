@@ -35,6 +35,7 @@ class DesignRequest(BaseModel):
     audio_analysis: str = ""  # testo prodotto dall'analisi della traccia
     gear: str = ""  # strumentazione disponibile (chitarre, pickup, accordature)
     references: list[dict[str, Any]] = []  # ricette importate da usare come base
+    use_iridium: bool = False  # ampli e cab della linea 1 dallo Strymon Iridium (solo Helix)
 
 
 @dataclass
@@ -120,6 +121,21 @@ REGOLE:
    originale e la tua competenza. Mai risorse a pagamento.
 7. Assegna ai footswitch i blocchi che il chitarrista vorra' attivare a mano (es. drive extra, delay).
 8. Scrivi le note per il chitarrista in italiano.
+9. Se la chitarra ha un pickup piezo e il brano (o la patch) ha parti acustiche, crea uno snapshot "Acustico" pensato per
+   il piezo: niente ampli distorto (spegni gli ampli o usa un ampli pulito a gain molto basso), compressore, EQ che toglie
+   le basse sotto 100 Hz e ammorbidisce le alte, riverbero; nelle notes scrivi di passare al piezo in quello snapshot.
+   Una chitarra con piezo + humbucker copre cosi' sia i pezzi acustici sia quelli distorti senza cambiarla.
+"""
+
+IRIDIUM_RULES = """
+STRYMON IRIDIUM: il chitarrista usa uno Strymon Iridium nel loop effetti dello Stadium per ampli e cab della linea 1.
+Progetta comunque la catena completa (con ampli e cab interni: servono per il Quad Cortex e come riserva), ma aggiungi
+il campo "iridium": {"enabled": true, "snapshots": [{"snapshot": "nome snapshot", "amp": "Round|Chime|Punch",
+"cab": "A|B|C", "drive": 0-10, "bass": 0-10, "middle": 0-10, "treble": 0-10, "level": 0-10, "room": 0-10, "notes": ""}]}
+con UNA voce per ogni snapshot, nello stesso ordine. Ampli dell'Iridium: Round = Fender Deluxe Reverb (puliti, pop),
+Chime = Vox AC30 (jangle, crunch brillante), Punch = Marshall Plexi (crunch e distorto rock). Cab A/B/C sono i tre cab
+abbinati a ciascun ampli. Per i suoni molto saturi tieni drive alto e usa i drive della linea 1 come boost; level
+pareggiato tra snapshot (5 = riferimento).
 """
 
 
@@ -181,6 +197,8 @@ def _user_prompt(req: DesignRequest, research: str) -> str:
     ]
     if req.gear_preferences:
         parts.append(f"PREFERENZE: {req.gear_preferences}")
+    if req.use_iridium:
+        parts.append(IRIDIUM_RULES)
     if req.gear:
         parts.append("STRUMENTAZIONE DELL'UTENTE (tarare gain ed EQ su questi pickup; se la chitarra non e' indicata "
                      "scegli la piu' adatta da qui e scrivila in guitar.description; nelle notes indica il pickup da usare "
@@ -227,6 +245,30 @@ def check_models(recipe: ToneRecipe) -> list[str]:
     return warnings
 
 
+def apply_gear_rules(recipe: ToneRecipe, iridium: bool | None = None) -> list[str]:
+    """Applica i vincoli della strumentazione che l'AI potrebbe non aver rispettato."""
+    from .gear import load_gear
+
+    g = load_gear()
+    notes: list[str] = []
+    if g.wah_external:
+        wahs = [b.id for b in recipe.chain if b.role == Role.wah]
+        if wahs:
+            recipe.chain = [b for b in recipe.chain if b.id not in wahs]
+            recipe.footswitches = [f for f in recipe.footswitches if f.block_id not in wahs]
+            for s in recipe.snapshots:
+                for bid in wahs:
+                    s.enabled.pop(bid, None)
+                    s.overrides.pop(bid, None)
+            notes.append("Tolto il blocco wah: usi il wah esterno.")
+    if recipe.iridium is not None:
+        recipe.iridium.midi_channel = g.iridium_midi_channel
+        recipe.iridium.first_preset = g.iridium_first_preset
+        if iridium is False or not g.iridium:
+            recipe.iridium.enabled = False
+    return notes
+
+
 def design(req: DesignRequest, provider: LLMProvider, *, web_research: bool = True,
            audio_path: str | None = None) -> DesignResult:
     research_text, sources, warnings = "", [], []
@@ -242,6 +284,7 @@ def design(req: DesignRequest, provider: LLMProvider, *, web_research: bool = Tr
         user += "\n\nTi allego la traccia audio: ascoltala per capire gain, EQ, effetti e dinamica."
     data = provider.complete_json(system, user, audio_path=use_audio)
     recipe = _validate(data, provider, system, user)
+    warnings += apply_gear_rules(recipe, req.use_iridium)
     warnings += check_models(recipe)
     return DesignResult(recipe, research_text, sources, warnings)
 
@@ -272,12 +315,15 @@ def edit(recipe: ToneRecipe, instruction: str, provider: LLMProvider, *, web_res
             research_text, sources = rr.text, rr.sources
         except AIError:
             pass
+    if recipe.iridium and recipe.iridium.enabled:
+        system += IRIDIUM_RULES
     user = ("RICETTA ATTUALE:\n" + recipe.model_dump_json(indent=1)
             + "\n\nMODIFICA RICHIESTA: " + instruction
             + (f"\n\nRISULTATI DELLA RICERCA WEB:\n{research_text}" if research_text else "")
             + "\n\nRestituisci la ricetta JSON completa.")
     data = provider.complete_json(system, user)
     new = _validate(data, provider, system, user)
+    apply_gear_rules(new, recipe.iridium.enabled if recipe.iridium else None)
     added = [n for n in new.notes if n not in recipe.notes]
     changes = [n for n in added if n.lower().startswith("modifica:")]
     # le righe "Modifica:" sono la risposta in chat, non note permanenti del preset
@@ -309,9 +355,15 @@ def describe_audio(provider: LLMProvider, audio_path: str, features_text: str = 
 
 
 SUGGEST_PROMPT = """Sei il tecnico di palco di un chitarrista. Per ogni brano della scaletta scegli, tra le chitarre
-dell'utente, quella che rende meglio il suono originale, e indica pickup per le parti principali e accordatura.
-Considera la chitarra originale del brano, il tipo di pickup (single/humbucker/P90), l'accordatura e la praticita'
-dal vivo (poche sostituzioni di chitarra tra brani consecutivi, a parita' di resa).
+dell'utente, quella con cui suonarlo, e indica pickup per le parti principali e accordatura.
+Criteri, in ordine:
+1. rispetta il campo "da usare per" di ogni chitarra: e' la scelta del chitarrista (es. una chitarra per pop e puliti,
+   un'altra per acustici e pezzi duri). Non proporre mai le chitarre DI RISERVA;
+2. CONTINUITA': tieni la stessa chitarra su brani consecutivi e cambiala solo se il brano lo richiede davvero
+   (parte acustica che serve il piezo, distorsione che i single coil non reggono, accordatura diversa). Non serve
+   cambiare chitarra solo perche' nel disco ne usavano un'altra: si adatta il suono con la patch;
+3. resa del suono originale (single coil, humbucker, P90, piezo).
+Nel campo "reason" spiega in breve, e se cambi chitarra rispetto al brano prima di' perche' e' necessario.
 
 Rispondi in JSON: {"songs": [{"index": 0, "guitar": "nome esatto della chitarra", "pickups": "es. ponte per la
 strofa, manico per l'assolo", "tuning": "es. standard, mezzo tono sotto", "original": "chitarra usata nel disco",

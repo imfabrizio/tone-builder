@@ -24,7 +24,7 @@ from ..knobs import map_settings
 from ..recipe import Block, Role, ToneRecipe
 
 MAX_BLOCKS_PER_PATH = 12
-HELIX_SWITCHES = [f"FS{i}" for i in range(1, 11)]
+HELIX_SWITCHES = [f"FS{i}" for i in (1, 2, 3, 4, 5, 7, 8, 9, 10, 11)]  # FS6 e FS12 riservati
 _QC_LETTERS = "ABCDEFGH"
 
 
@@ -103,6 +103,59 @@ def _switch_name(s: str) -> str:
     return s
 
 
+IRIDIUM_LOOPS = ("HD2_FXLoopStereo1_2", "HD2_FXLoopMono1")
+# footswitch che richiamano gli snapshot (FS6 e FS12 sono riservati sullo Stadium)
+SNAPSHOT_SWITCHES = ["FS1", "FS2", "FS3", "FS4", "FS5", "FS7", "FS8", "FS9"]
+FREE_SWITCHES = ["FS10", "FS11"]
+
+
+def _apply_iridium(recipe: ToneRecipe, cat: HelixCatalog, warnings: list[str]) -> tuple[ToneRecipe, list[dict]]:
+    """Linea 1: ampli e cab sostituiti da un loop effetti verso lo Strymon Iridium.
+    Ogni snapshot ha un footswitch che cambia snapshot e invia il Program Change all'Iridium."""
+    plan = recipe.iridium
+    loop = next((m for m in (cat.get(x) for x in IRIDIUM_LOOPS)
+                 if m and (m.in_library or not cat.library_ready())), None)
+    if loop is None:
+        warnings.append("Iridium non applicato: nei tuoi export manca un blocco FX Loop. Crea sullo Stadium un preset "
+                        "con un FX Loop, reimporta la libreria e rigenera. Per ora uso ampli e cab interni.")
+        return recipe, []
+    r = recipe.model_copy(deep=True)
+    removed = [b.id for b in r.chain if b.line == 1 and b.role in (Role.amp, Role.preamp, Role.cab, Role.ir)]
+    if not removed:
+        return recipe, []
+    first = next(i for i, b in enumerate(r.chain) if b.id in removed)
+    r.chain = [b for b in r.chain if b.id not in removed]
+    r.chain.insert(first, Block(id="iridium", role=Role.fxloop, label="Iridium", gear_ref="Strymon Iridium", line=1,
+                                helix={"model": loop.model_id, "params": {"Send": 0.0, "Return": 0.0, "Mix": 1.0}}))
+    for s in r.snapshots:
+        for bid in removed:
+            s.enabled.pop(bid, None)
+            s.overrides.pop(bid, None)
+    r.footswitches = [f for f in r.footswitches if f.block_id not in removed]
+
+    # gli snapshot occupano FS1-5 e FS7-9: i footswitch dei blocchi vanno su FS10-FS11
+    free = list(FREE_SWITCHES)
+    kept = []
+    for f in r.footswitches:
+        if free:
+            f.switch = free.pop(0)
+            kept.append(f)
+        else:
+            warnings.append(f"Iridium: footswitch del blocco '{f.label or f.block_id}' tolto (posti finiti)")
+    r.footswitches = kept
+
+    commands: list[dict] = []
+    for i, snap in enumerate(r.snapshots[:len(SNAPSHOT_SWITCHES)]):
+        sw = SNAPSHOT_SWITCHES[i]
+        commands.append({"switch": sw, "command": "snapshot", "snapshot": i, "label": snap.name[:16]})
+        commands.append({"switch": sw, "command": "midi_pc", "program": plan.first_preset + i,
+                         "channel": plan.midi_channel})
+    warnings.append(f"Iridium: ampli e cab della linea 1 sostituiti dal loop effetti; snapshot su "
+                    f"{', '.join(SNAPSHOT_SWITCHES[:len(r.snapshots)])} con Program Change {plan.first_preset}-"
+                    f"{plan.first_preset + len(r.snapshots) - 1} sul canale MIDI {plan.midi_channel}.")
+    return r, commands
+
+
 def build_spec(recipe: ToneRecipe, cat: HelixCatalog | None = None) -> HelixBuild:
     """Traduce la ricetta nel formato recipe di helixgen.
 
@@ -111,6 +164,9 @@ def build_spec(recipe: ToneRecipe, cat: HelixCatalog | None = None) -> HelixBuil
     """
     cat = cat or HelixCatalog.load()
     warnings: list[str] = []
+    commands: list[dict] = []
+    if recipe.iridium and recipe.iridium.enabled:
+        recipe, commands = _apply_iridium(recipe, cat, warnings)
     chain = [b for b in recipe.chain if b.role != Role.looper]
     for ln in (1, 2):
         n = sum(1 for b in chain if b.line == ln)
@@ -123,7 +179,7 @@ def build_spec(recipe: ToneRecipe, cat: HelixCatalog | None = None) -> HelixBuil
     chosen = {b.id: _choose_model(b, cat, warnings) for b in chain}
     models = {bid: m for bid, m in chosen.items() if m is not None}
     chain = [b for b in chain if b.id in models]
-    if not any(m.role == Role.amp or m.role == Role.preamp for m in models.values()):
+    if not any(m.role in (Role.amp, Role.preamp, Role.fxloop) for m in models.values()):
         warnings.append("Attenzione: nel preset Helix non c'e' nessun ampli. Importa dallo Stadium almeno un preset con l'ampli che ti serve.")
     ids = [m.model_id for m in models.values()]
     has_dupes = len(ids) != len(set(ids))
@@ -213,6 +269,8 @@ def build_spec(recipe: ToneRecipe, cat: HelixCatalog | None = None) -> HelixBuil
         fs.append(item)
     if fs:
         spec["footswitches"] = fs
+    if commands:
+        spec["commands"] = commands
 
     return HelixBuild(spec, warnings, {bid: m.model_id for bid, m in models.items()})
 

@@ -35,6 +35,7 @@ CATEGORY_ROLE: dict[str, Role] = {
     "filter": Role.filter,
     "synth": Role.synth,
     "looper": Role.looper,
+    "fxloop": Role.fxloop,
 }
 
 _ROLE_CATEGORIES: dict[Role, set[str]] = {}

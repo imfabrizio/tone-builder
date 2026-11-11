@@ -67,6 +67,7 @@
           <div class="field">
             <label for="reqPrefs">Preferenze</label>
             <input id="reqPrefs" placeholder="Es. niente fuzz, preferisco ampli Fender">
+            <label class="check iridium-only hidden"><input type="checkbox" id="reqIridium"> Ampli e cab dallo Strymon Iridium (solo Helix)</label>
           </div>
           <div class="field span2">
             <label for="reqSnapshots">Snapshot che ti servono</label>
@@ -111,6 +112,12 @@
           <div class="matrix-wrap"><table class="matrix" id="matrix"></table></div>
           <p class="hint">Clicca una casella per accendere o spegnere il blocco in quello snapshot. Clicca il nome dello snapshot per i valori dedicati.</p>
           <div class="snap-editor hidden" id="snapEditor"></div>
+
+          <div id="iridiumBox" class="hidden">
+            <h2 class="sec">Strymon Iridium</h2>
+            <label class="check"><input type="checkbox" id="iridiumOn"> Nel file per lo Stadium, ampli e cab della linea 1 li fa l'Iridium</label>
+            <div id="iridiumGuide"></div>
+          </div>
 
           <h2 class="sec">Note per il chitarrista</h2>
           <ul class="notes" id="notes"></ul>
@@ -218,7 +225,20 @@
     <datalist id="guitarOptions"></datalist>
     <datalist id="pickupOptions"></datalist>
     <button class="btn" id="addGuitar">Aggiungi chitarra</button>
-    <div class="field"><label for="gearOther">Altro (pedali o ampli reali, wah esterno, EBow…)</label><textarea id="gearOther" rows="2"></textarea></div>
+    <fieldset>
+      <legend>Sulle pedaliere</legend>
+      <label class="check"><input type="checkbox" id="gearWah"> Uso un wah esterno: non mettere mai blocchi wah nei preset</label>
+      <label class="check"><input type="checkbox" id="gearIridium"> Ho uno Strymon Iridium da usare nel loop effetti dello Stadium</label>
+      <div class="row">
+        <div class="field"><label for="gearIrCh">Canale MIDI dell'Iridium</label><input id="gearIrCh" type="number" min="1" max="16" value="1"></div>
+        <div class="field"><label for="gearIrFirst">Primo preset Iridium da usare</label><input id="gearIrFirst" type="number" min="0" max="119" value="10"></div>
+      </div>
+    </fieldset>
+    <div class="field"><label for="gearOther">Altro (pedali o ampli reali, EBow…)</label><textarea id="gearOther" rows="2"></textarea></div>
+    <div class="row">
+      <a class="btn ghost" href="/api/gear/export" download>Esporta in un file</a>
+      <label class="btn ghost">Importa da file<input type="file" id="gearImport" accept=".json" hidden></label>
+    </div>
     <div class="dlg-actions">
       <button class="btn ghost" id="gearClose">Chiudi</button>
       <button class="btn primary" id="gearSave">Salva</button>
@@ -260,6 +280,9 @@
     <div class="row">
       <div class="field" style="width:160px"><label for="reduceMax">Numero massimo di patch</label><input id="reduceMax" type="number" min="1" max="8" value="4"></div>
       <div class="field" style="flex:1"><label for="reduceNotes">Indicazioni</label><input id="reduceNotes" placeholder="Es. una patch per i pezzi puliti, una per il rock 90's, una per i pezzi distorti"></div>
+    </div>
+    <div class="row">
+      <label class="check iridium-only hidden"><input type="checkbox" id="reduceIridium"> Ampli e cab dallo Strymon Iridium (solo Helix)</label>
     </div>
     <button class="btn" id="reducePropose">Proponi i gruppi</button>
     <div id="reduceResult"></div>
