@@ -342,7 +342,7 @@ class EditIn(BaseModel):
 @app.post("/api/edit")
 def api_edit(body: EditIn) -> dict:
     try:
-        res = edit(body.recipe, body.instruction, _provider())
+        res = edit(body.recipe, body.instruction, _provider(), web_research=load_settings().web_research)
     except AIError as e:
         _err(e)
     out = res.to_dict()

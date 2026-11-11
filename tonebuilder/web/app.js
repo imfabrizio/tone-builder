@@ -590,8 +590,8 @@ async function sendChat(e) {
     const res = await busy("Applico la modifica…", () => api("POST", "/api/edit", { recipe: s.recipe, instruction: text }));
     s.recipe = res.recipe;
     s.warnings = res.warnings || [];
-    const last = (res.recipe.notes || []).slice(-1)[0];
-    s.chat.push({ who: "ai", text: last || "Modifica applicata." });
+    s.chat.push({ who: "ai", text: res.reply || "Modifica applicata." });
+    if (res.research) { s.research = res.research; s.sources = res.sources || []; }
     recipeChanged();
     renderMeters(res.dsp);
   } catch (err) {

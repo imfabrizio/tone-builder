@@ -42,10 +42,11 @@ class DesignResult:
     research: str = ""
     sources: list[dict[str, str]] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
+    reply: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {"recipe": self.recipe.model_dump(), "research": self.research,
-                "sources": self.sources, "warnings": self.warnings}
+                "sources": self.sources, "warnings": self.warnings, "reply": self.reply}
 
 
 RECIPE_FORMAT = """
@@ -112,8 +113,9 @@ REGOLE:
    Ordine dei blocchi = ordine del segnale dentro ogni linea.
 5. Uno snapshot per ogni sezione richiesta (max 8). Negli snapshot cambia solo cio' che serve:
    on/off dei blocchi in "enabled", valori diversi in "overrides". Usa level_db per bilanciare i volumi (es. +2 nell'assolo).
-6. Se nella ricerca hai trovato preset o IR GRATUITI ben valutati, usali come riferimento per le impostazioni e citali nelle "notes".
-   Mai risorse a pagamento.
+6. Se la ricerca riporta preset o IR GRATUITI ben valutati, usali come riferimento per le impostazioni e citali nelle "notes"
+   con il link. Se non ne riporta, NON scriverlo nelle notes e non rimandare l'utente a cercare: usa la strumentazione
+   originale e la tua competenza. Mai risorse a pagamento.
 7. Assegna ai footswitch i blocchi che il chitarrista vorra' attivare a mano (es. drive extra, delay).
 8. Scrivi le note per il chitarrista in italiano.
 """
@@ -148,15 +150,23 @@ def system_prompt() -> str:
 
 def research_prompt(req: DesignRequest) -> str:
     song = " - ".join(x for x in [req.artist, req.title] if x) or req.description
+    q = " ".join(x for x in [req.artist, req.title] if x) or req.description
     return (
-        f"Sto ricreando il suono di chitarra di: {song}.\n"
+        f"Sto ricreando su multieffetto il suono di chitarra di: {song}.\n"
         f"Descrizione: {req.description}\n\n"
-        "Cerca sul web e riassumi in italiano:\n"
-        "1. Strumentazione originale del chitarrista per questo brano (ampli, pedali, chitarra, effetti) e come suona nelle varie parti.\n"
-        "2. Preset GRATUITI gia' esistenti per Line 6 Helix/HX (es. CustomTone di Line 6) e per Neural DSP Quad Cortex "
-        "(es. Cortex Cloud, forum, YouTube), con il link e cosa ne dicono gli utenti nei commenti (valutazioni, pregi, difetti).\n"
-        "3. Impulse response (IR) GRATUITI adatti a questo suono, con link e giudizi degli utenti.\n"
-        "Ignora tutto cio' che e' a pagamento. Indica le fonti."
+        "Fai PIU' ricerche web, con angolazioni diverse, prima di rispondere. Per esempio:\n"
+        f"- \"{q} guitar tone\", \"{q} guitar rig\", \"{q} amp settings\", intervista o rig rundown del chitarrista;\n"
+        f"- \"{q} helix preset\", \"{q} helix patch free\", \"{q} customtone\", \"{q} hx stomp preset\";\n"
+        f"- \"{q} quad cortex preset\", \"{q} cortex cloud\";\n"
+        f"- video YouTube \"{q} tone helix\" o \"how to sound like\" con le impostazioni mostrate;\n"
+        "- forum (Line 6 community, The Gear Page, Reddit r/Line6Helix e r/QuadCortex) per i commenti degli utenti.\n\n"
+        "Poi riassumi in italiano, in modo concreto:\n"
+        "1. Strumentazione originale (chitarra e pickup, ampli, pedali, effetti) e come cambia il suono tra le parti del brano.\n"
+        "2. Impostazioni concrete trovate (gain, EQ, tempi di delay, tipo di riverbero, accordatura), con la fonte.\n"
+        "3. Preset GRATUITI trovati per Helix/HX o Quad Cortex: nome, link e cosa ne dicono gli utenti. Se non ne trovi, "
+        "scrivi solo \"nessun preset gratuito trovato\".\n"
+        "4. IR GRATUITI adatti, con link e giudizi.\n"
+        "Ignora tutto cio' che e' a pagamento."
     )
 
 
@@ -236,17 +246,39 @@ Applica SOLO la modifica richiesta, lasciando invariato il resto, e restituisci 
 Esempi: "piu' gain nell'assolo" -> overrides dello snapshot assolo; "metti il delay sul FS3" -> footswitches;
 "il mix del riverbero cambia per snapshot" -> overrides del riverbero in ogni snapshot;
 "togli il compressore" -> rimuovi il blocco e ogni riferimento negli snapshot/footswitch.
-Aggiungi in "notes" una riga che spiega cosa hai cambiato.
+Aggiungi in "notes" UNA riga che inizia con "Modifica:" e spiega cosa hai cambiato e perche'. Se la richiesta e' un
+dubbio o una critica (es. "e' troppo scarno"), intervieni sul preset per risolverlo e spiegalo in quella riga.
+Non aggiungere altre note, e togli dalle notes le righe che rimandano l'utente a cercare preset o IR da solo.
 """
 
+_RESEARCH_WORDS = ("cerca", "ricerca", "trova", "preset", " ir", "impulse", "customtone", "cortex cloud", "online", "web")
 
-def edit(recipe: ToneRecipe, instruction: str, provider: LLMProvider) -> DesignResult:
+
+def edit(recipe: ToneRecipe, instruction: str, provider: LLMProvider, *, web_research: bool = True) -> DesignResult:
     system = system_prompt() + "\n" + EDIT_RULES
+    research_text, sources = "", []
+    low = f" {instruction.lower()}"
+    if web_research and provider.supports_web and any(w in low for w in _RESEARCH_WORDS):
+        req = DesignRequest(title=recipe.song.title, artist=recipe.song.artist,
+                            description=f"{recipe.description}. Richiesta: {instruction}")
+        try:
+            rr = provider.research(research_prompt(req))
+            research_text, sources = rr.text, rr.sources
+        except AIError:
+            pass
     user = ("RICETTA ATTUALE:\n" + recipe.model_dump_json(indent=1)
-            + "\n\nMODIFICA RICHIESTA: " + instruction + "\n\nRestituisci la ricetta JSON completa.")
+            + "\n\nMODIFICA RICHIESTA: " + instruction
+            + (f"\n\nRISULTATI DELLA RICERCA WEB:\n{research_text}" if research_text else "")
+            + "\n\nRestituisci la ricetta JSON completa.")
     data = provider.complete_json(system, user)
     new = _validate(data, provider, system, user)
-    return DesignResult(new, warnings=check_models(new))
+    added = [n for n in new.notes if n not in recipe.notes]
+    changes = [n for n in added if n.lower().startswith("modifica:")]
+    # le righe "Modifica:" sono la risposta in chat, non note permanenti del preset
+    new.notes = [n for n in new.notes if n not in changes]
+    res = DesignResult(new, research=research_text, sources=sources, warnings=check_models(new))
+    res.reply = " ".join(c.split(":", 1)[1].strip() for c in changes) or (added[-1] if added else "Modifica applicata.")
+    return res
 
 
 ANALYSIS_PROMPT = """Ascolta questa traccia (chitarra, eventualmente gia' isolata) e descrivi in italiano, in modo tecnico:
