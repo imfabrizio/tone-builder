@@ -939,10 +939,17 @@ function openReduce() {
   S.reduceProposal = null;
   S.reduceChat = [];
   $("#reduceResult").innerHTML = "";
-  $("#reduceChat").innerHTML = "";
-  $("#reduceTalk").classList.add("hidden");
+  S.reduceChat = [{ who: "ai", text: "Dimmi come vuoi raggruppare i brani, a voce o scrivendo, oppure premi Proponi i gruppi e decido io." }];
+  renderReduceChat();
   $("#reduceCreate").classList.add("hidden");
   $("#reduceDlg").showModal();
+}
+
+async function makeProposal(notes) {
+  await saveNow();
+  S.reduceProposal = await api("POST", `/api/setlists/${S.setlist.id}/group-proposal`,
+    { max_patches: +$("#reduceMax").value || 4, notes });
+  renderProposal();
 }
 
 function renderReduceChat() {
@@ -955,6 +962,21 @@ function renderReduceChat() {
 async function reduceTurn(text) {
   S.reduceChat.push({ who: "me", text });
   renderReduceChat();
+  if (!S.reduceProposal) {  // primo messaggio: diventa l'indicazione per la proposta
+    const notes = [$("#reduceNotes").value.trim(), text].filter(Boolean).join(". ");
+    try {
+      await makeProposal(notes);
+    } catch (e) {
+      S.reduceChat.push({ who: "ai", text: e.message, err: true });
+      renderReduceChat();
+      return "";
+    }
+    const n = S.reduceProposal.patches.length;
+    const reply = `Ecco la proposta: ${n} patch, ${S.reduceProposal.patches.map((p) => p.name).join(", ")}. Dimmi cosa cambiare, oppure di' ok e le creo.`;
+    S.reduceChat.push({ who: "ai", text: reply });
+    renderReduceChat();
+    return reply;
+  }
   let res;
   try {
     res = await api("POST", `/api/setlists/${S.setlist.id}/group-revise`, {
@@ -1030,11 +1052,8 @@ function bindReduce() {
   $("#reducePropose").addEventListener("click", async () => {
     try {
       await saveNow();
-      S.reduceProposal = await busy("Raggruppo i brani…", () => api("POST", `/api/setlists/${S.setlist.id}/group-proposal`,
-        { max_patches: +$("#reduceMax").value || 4, notes: $("#reduceNotes").value.trim() }));
-      renderProposal();
-      $("#reduceTalk").classList.remove("hidden");
-      S.reduceChat = [{ who: "ai", text: "Ecco la mia proposta. Dimmi cosa cambiare, oppure di' ok e le creo." }];
+      await busy("Raggruppo i brani…", () => makeProposal($("#reduceNotes").value.trim()));
+      S.reduceChat.push({ who: "ai", text: "Ecco la mia proposta. Dimmi cosa cambiare, oppure di' ok e le creo." });
       renderReduceChat();
     } catch {}
   });
@@ -1050,6 +1069,7 @@ function bindReduce() {
   $("#reduceTalkBtn").addEventListener("click", reduceTalkLoop);
   $("#reduceDlg").addEventListener("close", () => { reduceTalk.on = false; reduceTalk.ctl.stop?.(); window.speechSynthesis?.cancel(); });
   attachMic($("#reduceInput"));
+  attachMic($("#reduceNotes"));
   $("#patchInfo").addEventListener("click", (e) => {
     const id = e.target.dataset.openPatch;
     if (!id) return;
