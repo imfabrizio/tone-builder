@@ -143,6 +143,8 @@ def test_generic_patches_dialog_and_youtube(recipe, monkeypatch, tmp_path):
     # il dialogo non esegue azioni senza un ok esplicito
     r = c.post("/api/dialog", json={"setlist_id": sid, "history": [{"who": "me", "text": "riduciamo le patch"}]}).json()
     assert r["action"] is None and r["reply"]
+    assert r["pending_action"]["type"] == "generic_patches" and "patch generiche" in r["pending_label"]
+    assert c.get(f"/api/setlists/{sid}/jobs").json() == []
     r = c.post("/api/dialog", json={"setlist_id": sid, "history": [{"who": "me", "text": "ok procedi"}]}).json()
     assert r["action"]["type"] == "generic_patches"
 

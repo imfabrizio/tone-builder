@@ -638,7 +638,9 @@ function chatLog() {
 function renderAssist() {
   const s = song();
   const log = S.setlist ? chatLog() : [];
-  $("#chat").innerHTML = log.map((m) => `<div class="msg ${m.who} ${m.err ? "err" : ""}">${esc(m.text)}</div>`).join("")
+  $("#chat").innerHTML = log.map((m, i) => `<div class="msg ${m.who} ${m.err ? "err" : ""}">${esc(m.text)}${
+    m.pending ? `<div class="confirm-row"><button class="btn primary small" data-confirm="${i}">Sì, esegui: ${esc(m.pendingLabel || "procedi")}</button><button class="btn ghost small" data-dismiss="${i}">No</button></div>`
+    : m.confirmed ? `<div class="confirm-note">Confermato: ${esc(m.pendingLabel || "")}</div>` : ""}</div>`).join("")
     || `<p class="hint">${S.mode === "dialog" ? "Esempio: \"ho questa scaletta, voglio al massimo quattro patch: una pulita, una crunch anni '90, una distorta, una per i lenti\"." : "Quando il preset è pronto puoi chiedere modifiche, come faresti con un tecnico del suono."}</p>`;
   const chat = $("#chat");
   chat.scrollTop = chat.scrollHeight;
@@ -692,12 +694,35 @@ async function dialogTurn(text) {
     return "";
   }
   stop();
-  log.push({ who: "ai", text: res.reply });
+  const msg = { who: "ai", text: res.reply };
+  if (res.pending_action) Object.assign(msg, { pending: res.pending_action, pendingLabel: res.pending_label });
+  log.push(msg);
   renderAssist();
   saveSoon();
   if (res.action) await executeAction(res.action);
   return res.reply;
 }
+
+/* conferma con un clic di un'azione proposta dall'AI */
+$("#chat").addEventListener("click", async (e) => {
+  const b = e.target.closest("[data-confirm],[data-dismiss]");
+  if (!b) return;
+  const log = chatLog();
+  const m = log[Number(b.dataset.confirm ?? b.dataset.dismiss)];
+  if (!m?.pending) return;
+  const action = m.pending;
+  m.pending = null;
+  if (b.dataset.dismiss !== undefined) {
+    log.push({ who: "me", text: "No, lascia stare." });
+    renderAssist();
+    saveSoon();
+    return;
+  }
+  m.confirmed = true;
+  log.push({ who: "me", text: `Ok, procedi: ${m.pendingLabel || ""}` });
+  renderAssist();
+  await executeAction(action);
+});
 
 async function executeAction(action) {
   const log = chatLog();
@@ -725,11 +750,39 @@ async function executeAction(action) {
   saveSoon();
 }
 
+/* barra dei lavori in background: resta visibile anche dopo un ricaricamento */
+const jobSeen = {};
+async function refreshJobBar() {
+  const bar = $("#jobBar");
+  if (!S.setlist) { bar.classList.add("hidden"); return; }
+  let jobs = [];
+  try { jobs = await api("GET", `/api/setlists/${S.setlist.id}/jobs`); } catch { return; }
+  const rows = [];
+  let finished = false;
+  for (const j of jobs) {
+    const key = `${S.setlist.id}:${j.kind}`;
+    if (j.running) {
+      jobSeen[key] = "running";
+      const pct = j.total ? Math.round((j.done / j.total) * 100) : 0;
+      rows.push(`<div class="job run"><span class="dots" aria-hidden="true"><i></i><i></i><i></i></span><div><strong>${esc(j.label)}</strong>: ${j.done} di ${j.total}${j.current ? ` — ${esc(j.current)}` : ""}<div class="jobmeter"><span style="width:${pct}%"></span></div></div></div>`);
+    } else if (jobSeen[key] === "running" || jobSeen[key] === "done") {
+      if (jobSeen[key] === "running") finished = true;
+      jobSeen[key] = "done";
+      rows.push(`<div class="job ok"><strong>${esc(j.label)}</strong>: completato, ${j.done} di ${j.total}${j.errors ? `, ${j.errors} problemi` : ""}</div>`);
+    }
+  }
+  bar.innerHTML = rows.join("");
+  bar.classList.toggle("hidden", !rows.length);
+  if (finished && $("#busy").classList.contains("hidden")) await openSetlist(S.setlist.id, S.songIdx);
+}
+setInterval(refreshJobBar, 4000);
+
 /* lavori lunghi: avanzamento a schermo */
 async function pollJob(kind, label) {
   const url = kind === "design-all" ? `/api/setlists/${S.setlist.id}/design-all` : `/api/jobs/${S.setlist.id}/${kind}`;
   $("#busy").classList.remove("hidden");
   $("#busyText").textContent = `${label}…`;
+  refreshJobBar();
   let j;
   for (;;) {
     try { j = await api("GET", url); } catch (e) { j = { running: false, errors: [e.message] }; }

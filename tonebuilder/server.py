@@ -481,6 +481,35 @@ def _start_job(key: str, total: int, work) -> dict[str, Any]:
     return job
 
 
+JOB_LABELS = {"youtube": "Ascolto dei brani da YouTube", "design-all": "Creazione dei preset",
+              "generic": "Creazione delle patch generiche"}
+
+
+def jobs_summary(sid: str) -> list[dict]:
+    out = []
+    for kind, label in JOB_LABELS.items():
+        j = _jobs.get(f"{sid}:{kind}")
+        if j:
+            out.append({"kind": kind, "label": label, "running": j.get("running", False), "done": j.get("done", 0),
+                        "total": j.get("total", 0), "current": j.get("current", ""), "errors": len(j.get("errors", []))})
+    return out
+
+
+def jobs_text(sid: str) -> str:
+    rows = []
+    for j in jobs_summary(sid):
+        state = "in corso" if j["running"] else "terminato"
+        rows.append(f"- {j['label']}: {state}, {j['done']} di {j['total']}"
+                    + (f", ora su {j['current']}" if j["running"] and j["current"] else "")
+                    + (f", {j['errors']} problemi" if j["errors"] else ""))
+    return "\n".join(rows)
+
+
+@app.get("/api/setlists/{sid}/jobs")
+def setlist_jobs(sid: str) -> list[dict]:
+    return jobs_summary(sid)
+
+
 @app.get("/api/jobs/{sid}/{kind}")
 def job_status(sid: str, kind: str) -> dict:
     return _jobs.get(f"{sid}:{kind}", {"running": False, "done": 0, "total": 0, "errors": [], "result": None})
@@ -663,9 +692,10 @@ class DialogIn(BaseModel):
 @app.post("/api/dialog")
 def api_dialog(body: DialogIn) -> dict:
     data = get_setlist(body.setlist_id)
-    ctx = planner.setlist_context(data, body.current, gearmod.describe_for_ai(gearmod.load_gear()))
+    ctx = planner.setlist_context(data, body.current, gearmod.describe_for_ai(gearmod.load_gear()),
+                                  jobs_text(body.setlist_id))
     try:
-        return planner.converse(body.history, ctx, _provider())
+        return planner.converse(body.history, ctx, _provider(), data)
     except AIError as e:
         _err(e)
 

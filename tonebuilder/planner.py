@@ -176,10 +176,13 @@ Azioni possibili (campo "action"):
 - {"type": "design_all", "description": "indicazioni comuni"} crea i preset di tutti i brani che non ce l'hanno.
 
 Rispondi SOLO in JSON: {"reply": "testo da dire all'utente", "action": null oppure un oggetto azione}.
-Quando restituisci un'azione, "reply" conferma in una frase cosa stai per fare."""
+Quando restituisci un'azione, "reply" conferma in una frase cosa stai per fare.
+IMPORTANTE: se "action" e' null NON dire mai che stai iniziando, che stai lavorando o che hai fatto qualcosa: in quel
+caso riassumi cosa faresti e chiedi l'ok. Se ti chiede se un lavoro e' partito o a che punto e', rispondi SOLO in base
+alla sezione LAVORI IN CORSO del contesto: se li' non c'e', non e' partito niente."""
 
 
-def setlist_context(setlist: dict, current: int | None, gear_text: str) -> str:
+def setlist_context(setlist: dict, current: int | None, gear_text: str, jobs_text: str = "") -> str:
     rows = []
     for i, s in enumerate(setlist.get("songs", [])):
         state = "patch generica" if s.get("kind") == "patch" else ("preset pronto" if s.get("recipe") else "senza preset")
@@ -198,21 +201,52 @@ def setlist_context(setlist: dict, current: int | None, gear_text: str) -> str:
             out += f"\n\nPRESET DEL BRANO APERTO \"{r.get('name', '')}\": blocchi {chain}; snapshot {snaps}"
     if gear_text:
         out += f"\n\nSTRUMENTAZIONE:\n{gear_text}"
+    out += "\n\nLAVORI IN CORSO:\n" + (jobs_text or "nessuno")
     return out
 
 
 _OK = re.compile(r"\b(ok|okay|va bene|vai|procedi|fallo|falla|falle|si'|sì|si\b|confermo|perfetto|d'accordo|esatto|avanti|crea)", re.I)
 
 
-def converse(history: list[dict], context: str, provider: LLMProvider) -> dict[str, Any]:
+ACTION_LABELS = {
+    "design_song": "creare il preset del brano",
+    "edit_song": "modificare il preset del brano",
+    "generic_patches": "creare le patch generiche",
+    "analyze_youtube": "ascoltare i brani da YouTube",
+    "design_all": "creare i preset di tutti i brani",
+}
+
+
+def describe_action(action: dict, setlist: dict | None = None) -> str:
+    label = ACTION_LABELS.get(action.get("type", ""), "eseguire l'operazione")
+    idx = action.get("song_index")
+    if setlist and isinstance(idx, int) and 0 <= idx < len(setlist.get("songs", [])):
+        label += f" \"{setlist['songs'][idx].get('title') or 'senza titolo'}\""
+    if action.get("type") == "generic_patches" and action.get("max_patches"):
+        label += f" (massimo {action['max_patches']})"
+    return label[0].upper() + label[1:]
+
+
+def converse(history: list[dict], context: str, provider: LLMProvider, setlist: dict | None = None) -> dict[str, Any]:
     convo = "\n".join(f"{'CHITARRISTA' if m.get('who') == 'me' else 'TU'}: {m.get('text', '')}" for m in history[-20:])
     data = provider.complete_json(DIALOG_PROMPT, f"{context}\n\nCONVERSAZIONE:\n{convo}\n\nRispondi all'ultimo messaggio.")
     reply = str(data.get("reply") or "").strip() or "Puoi ripetere?"
     action = data.get("action") if isinstance(data.get("action"), dict) else None
-    last = next((m.get("text", "") for m in reversed(history) if m.get("who") == "me"), "")
-    if action and not _OK.search(last):  # salvaguardia: niente azioni senza un ok esplicito
+    if action and action.get("type") not in ACTION_LABELS:
         action = None
-    return {"reply": reply, "action": action}
+    last = next((m.get("text", "") for m in reversed(history) if m.get("who") == "me"), "")
+    pending = None
+    if action and not _OK.search(last):
+        # niente azioni senza un ok esplicito: l'azione diventa una proposta da confermare con un clic
+        pending, action = action, None
+        reply = f"{reply}\n\nPer partire confermami con un ok, oppure premi il pulsante."
+    out: dict[str, Any] = {"reply": reply, "action": action}
+    if pending:
+        out["pending_action"] = pending
+        out["pending_label"] = describe_action(pending, setlist)
+    if action:
+        out["action_label"] = describe_action(action, setlist)
+    return out
 
 
 def transcribe_prompt() -> str:
