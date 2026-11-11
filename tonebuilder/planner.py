@@ -162,9 +162,15 @@ lette ad alta voce: niente elenchi lunghi, niente markdown, massimo 4-5 frasi.
 Il tuo compito:
 1. capire cosa vuole: fai UNA domanda alla volta quando manca qualcosa di importante (suono, sezioni, chitarra, quante
    patch, quali brani);
-2. quando hai un piano chiaro, riassumilo in poche frasi e chiedi esplicitamente se puoi procedere;
-3. SOLO quando l'utente da' un ok esplicito al piano riassunto (es. "ok", "vai", "procedi", "si', fallo"), restituisci
-   l'azione da eseguire. Senza ok esplicito, "action" deve essere null.
+2. quando hai un piano chiaro, riassumilo in poche frasi e chiedi se puoi procedere, e metti SUBITO l'azione nel campo
+   "action": il programma la mostra come proposta con un pulsante di conferma e la esegue solo dopo l'ok del
+   chitarrista. Quindi ogni volta che proponi qualcosa di concreto, "action" NON deve essere null;
+3. quando l'utente da' l'ok ("ok", "vai", "procedi", "si', fallo") restituisci di nuovo l'azione completa: verra' eseguita.
+   Non ripetere il riassunto: conferma in una frase.
+4. se ti chiede una modifica a un preset gia' fatto, usa "edit_song" sul brano giusto con un'istruzione precisa
+   (cosa cambiare e di quanto). Se il brano usa una patch generica, la modifica va fatta sulla patch.
+5. non ripetere mai la stessa risposta del turno prima: se l'utente insiste, vuol dire che non hai capito o che non hai
+   proposto l'azione; correggiti.
 
 Azioni possibili (campo "action"):
 - {"type": "design_song", "song_index": N, "description": "...", "snapshots": "...", "guitar": "...", "gear_preferences": "..."}
@@ -177,7 +183,7 @@ Azioni possibili (campo "action"):
 
 Rispondi SOLO in JSON: {"reply": "testo da dire all'utente", "action": null oppure un oggetto azione}.
 Quando restituisci un'azione, "reply" conferma in una frase cosa stai per fare.
-IMPORTANTE: se "action" e' null NON dire mai che stai iniziando, che stai lavorando o che hai fatto qualcosa: in quel
+IMPORTANTE: l'azione parte solo quando il chitarrista conferma. Se "action" e' null NON dire mai che stai iniziando, che stai lavorando o che hai fatto qualcosa: in quel
 caso riassumi cosa faresti e chiedi l'ok. Se ti chiede se un lavoro e' partito o a che punto e', rispondi SOLO in base
 alla sezione LAVORI IN CORSO del contesto: se li' non c'e', non e' partito niente."""
 

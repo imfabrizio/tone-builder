@@ -677,8 +677,21 @@ function working(chatEl, label, buttons = []) {
 }
 
 /* dialogo: risposta dell'AI ed esecuzione dopo l'ok */
+const OK_RE = /^\s*(ok|okay|va bene|vai|procedi|fallo|falla|falle|s[iì]|confermo|perfetto|d'accordo|esatto|avanti)\b/i;
+
 async function dialogTurn(text) {
   const log = chatLog();
+  // un "ok" breve dopo una proposta esegue direttamente l'azione proposta, senza richiedere all'AI
+  const lastAi = [...log].reverse().find((m) => m.who === "ai" && !m.err);
+  if (lastAi?.pending && OK_RE.test(text) && text.split(/\s+/).length <= 8) {
+    const action = lastAi.pending;
+    lastAi.pending = null;
+    lastAi.confirmed = true;
+    log.push({ who: "me", text });
+    renderAssist();
+    await executeAction(action);
+    return "";
+  }
   log.push({ who: "me", text });
   renderAssist();
   saveSoon();

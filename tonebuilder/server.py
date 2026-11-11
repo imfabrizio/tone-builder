@@ -717,6 +717,12 @@ def api_dialog_execute(body: ActionIn) -> dict:
             song = data["songs"][idx]
         except (TypeError, ValueError, IndexError):
             _err(ValueError("Brano non trovato"))
+        if kind == "edit_song" and not song.get("recipe") and song.get("uses_patch"):
+            # il brano usa una patch generica: la modifica va sulla patch
+            for j, other in enumerate(data["songs"]):
+                if other.get("id") == song["uses_patch"] and other.get("recipe"):
+                    idx, song = j, other
+                    break
         try:
             if kind == "edit_song" and song.get("recipe"):
                 res = edit(ToneRecipe.model_validate(song["recipe"]), str(a.get("instruction") or ""), _provider(),
