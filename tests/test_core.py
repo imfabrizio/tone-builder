@@ -278,3 +278,17 @@ def test_wah_removed_when_external(recipe, monkeypatch):
     notes = apply_gear_rules(recipe)
     assert not any(b.role == Role.wah for b in recipe.chain) and notes
     assert "wah1" not in recipe.snapshots[0].enabled
+
+
+def test_diff_recipes(recipe):
+    from tonebuilder.diff import diff_recipes
+    new = recipe.model_copy(deep=True)
+    b = new.chain[0]
+    k = next(iter(b.settings), "gain")
+    b.settings[k] = (b.settings.get(k, 5) or 0) + 2
+    new.snapshots[0].enabled[b.id] = not new.snapshots[0].enabled.get(b.id, b.enabled)
+    d = diff_recipes(recipe, new)
+    types = {i["type"] for i in d["items"]}
+    assert "knob" in types and "snap_enabled" in types
+    assert b.id in d["blocks"] and [b.id, new.snapshots[0].name] in d["cells"]
+    assert diff_recipes(recipe, recipe)["items"] == []

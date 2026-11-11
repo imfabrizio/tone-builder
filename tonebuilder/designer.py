@@ -22,6 +22,7 @@ from .ai.base import AIError, LLMProvider
 from .catalogs.helix import HelixCatalog
 from .catalogs.quadcortex import QCCatalog
 from .knobs import KNOB_ALIASES
+from .diff import diff_recipes
 from .recipe import Role, ToneRecipe
 
 
@@ -45,10 +46,11 @@ class DesignResult:
     sources: list[dict[str, str]] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
     reply: str = ""
+    changes: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {"recipe": self.recipe.model_dump(), "research": self.research,
-                "sources": self.sources, "warnings": self.warnings, "reply": self.reply}
+                "sources": self.sources, "warnings": self.warnings, "reply": self.reply, "changes": self.changes}
 
 
 RECIPE_FORMAT = """
@@ -330,6 +332,9 @@ def edit(recipe: ToneRecipe, instruction: str, provider: LLMProvider, *, web_res
     new.notes = [n for n in new.notes if n not in changes]
     res = DesignResult(new, research=research_text, sources=sources, warnings=check_models(new))
     res.reply = " ".join(c.split(":", 1)[1].strip() for c in changes) or (added[-1] if added else "Modifica applicata.")
+    res.changes = diff_recipes(recipe, new)
+    if not res.changes["items"]:
+        res.reply = "Non ho cambiato niente nel preset: prova a dirmi quale blocco o snapshot toccare e di quanto."
     return res
 
 

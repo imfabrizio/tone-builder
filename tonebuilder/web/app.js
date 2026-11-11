@@ -344,15 +344,61 @@ function renderPreset() {
 }
 
 /* pedaliera e matrice: ridisegnabili senza toccare gli editor aperti */
+/* cosa ha cambiato l'AI: testo leggibile per ogni differenza */
+function changeText(c) {
+  const k = (x) => KNOB_IT[x] || x;
+  const v = (x) => (x === null || x === undefined ? "—" : x);
+  const kv = (name, kn, o, n) => (o === null || o === undefined ? `${name} ${k(kn)} impostato a ${n}`
+    : n === null || n === undefined ? `${name} ${k(kn)} torna al valore base (${o} prima)` : `${name} ${k(kn)} ${o} → ${n}`);
+  switch (c.type) {
+    case "added": return `Aggiunto ${ROLE_IT[c.role] || c.role} "${c.name}" sulla linea ${c.line}`;
+    case "removed": return `Tolto ${ROLE_IT[c.role] || c.role} "${c.name}"`;
+    case "model": return `${ROLE_IT[c.role] || c.role}: "${c.old}" → "${c.new}"`;
+    case "line": return `${c.name}: spostato dalla linea ${c.old} alla linea ${c.new}`;
+    case "enabled": return `${c.name}: ${c.new ? "acceso" : "spento"} di base`;
+    case "knob": return kv(`${c.name}:`, c.knob, c.old, c.new);
+    case "ir": return `${c.name}: IR "${c.old || "nessuno"}" → "${c.new || "nessuno"}"`;
+    case "snap_added": return `Nuovo snapshot "${c.snap}"`;
+    case "snap_removed": return `Tolto lo snapshot "${c.snap}"`;
+    case "snap_enabled": return `Snapshot ${c.snap}: ${c.name} ${c.new ? "acceso" : "spento"}`;
+    case "snap_knob": return kv(`Snapshot ${c.snap}: ${c.name}`, c.knob, c.old, c.new);
+    case "snap_level": return `Snapshot ${c.snap}: volume ${v(c.old)} → ${v(c.new)} dB`;
+    case "rename": return `Nome del preset: "${c.old}" → "${c.new}"`;
+    default: return "";
+  }
+}
+
+function changesHtml(ch, open = false) {
+  const items = ch?.items || [];
+  if (!items.length) return "";
+  return `<details class="changes" ${open ? "open" : ""}><summary>Cosa è cambiato (${items.length})</summary><ul>${
+    items.map((c) => `<li>${esc(changeText(c))}</li>`).join("")}</ul></details>`;
+}
+
+function renderChangeBar() {
+  const s = song();
+  const bar = $("#changeBar");
+  const n = s?.last_changes?.items?.length || 0;
+  bar.classList.toggle("hidden", !n && !s?.prev_recipe);
+  if (!n && !s?.prev_recipe) return;
+  bar.innerHTML = `<div class="cb-row"><span>${n ? `Ultima modifica dell'AI: ${n} ${n === 1 ? "cambiamento" : "cambiamenti"}, evidenziati qui sotto.` : "Ultima modifica dell'AI."}</span>
+    ${s.prev_recipe ? `<button class="btn ghost small" id="undoAi">Annulla la modifica</button>` : ""}
+    ${n ? `<button class="btn ghost small" id="clearChg">Togli evidenziazione</button>` : ""}</div>${changesHtml(s.last_changes)}`;
+}
+
 function renderBoard() {
   const r = recipe();
+  renderChangeBar();
   if (!r) return;
+  const chg = song()?.last_changes || {};
+  const chgBlocks = new Set(chg.blocks || []);
+  const chgCells = new Set((chg.cells || []).map(([b, sn]) => `${b}|${sn}`));
   const fsOf = (id) => (r.footswitches || []).filter((f) => f.block_id === id).map((f) => f.switch).join(" ");
   const pedal = (b) => {
     const knobs = Object.entries(b.settings || {}).slice(0, 5)
       .map(([k, v]) => `<span class="knob">${esc(KNOB_IT[k] || k)} ${esc(v)}</span>`).join("");
     const fs = fsOf(b.id);
-    return `<div class="pedal ${b.enabled ? "" : "off"} ${S.selBlock === b.id ? "sel" : ""}" data-id="${esc(b.id)}"
+    return `<div class="pedal ${b.enabled ? "" : "off"} ${S.selBlock === b.id ? "sel" : ""} ${chgBlocks.has(b.id) ? "changed" : ""}" data-id="${esc(b.id)}"
               style="--c: var(--r-${b.role})" tabindex="0" role="button" aria-label="${esc(ROLE_IT[b.role])} ${esc(b.label || b.gear_ref)}">
         <span class="led"></span>
         <span class="role">${esc(ROLE_IT[b.role] || b.role)}</span>
@@ -380,7 +426,7 @@ function renderBoard() {
       const on = effOn(b, s);
       const ov = s.overrides?.[b.id];
       const ovTxt = ov ? Object.entries(ov).map(([k, v]) => `${KNOB_IT[k] || k} ${v}`).join(", ") : "";
-      html += `<td class="${on ? "on" : ""}" data-b="${esc(b.id)}" data-s="${i}" title="${on ? "Acceso" : "Spento"}${ovTxt ? " · " + esc(ovTxt) : ""}">
+      html += `<td class="${on ? "on" : ""} ${chgCells.has(`${b.id}|${s.name}`) ? "chg" : ""}" data-b="${esc(b.id)}" data-s="${i}" title="${on ? "Acceso" : "Spento"}${ovTxt ? " · " + esc(ovTxt) : ""}">
         ${on ? "ON" : "off"}${ovTxt ? `<span class="ov">${esc(ovTxt.length > 22 ? ovTxt.slice(0, 21) + "…" : ovTxt)}</span>` : ""}</td>`;
     });
     html += "<td style='background:none;cursor:default'></td></tr>";
@@ -638,7 +684,7 @@ function chatLog() {
 function renderAssist() {
   const s = song();
   const log = S.setlist ? chatLog() : [];
-  $("#chat").innerHTML = log.map((m, i) => `<div class="msg ${m.who} ${m.err ? "err" : ""}">${esc(m.text)}${
+  $("#chat").innerHTML = log.map((m, i) => `<div class="msg ${m.who} ${m.err ? "err" : ""}">${esc(m.text)}${changesHtml(m.changes, true)}${
     m.pending ? `<div class="confirm-row"><button class="btn primary small" data-confirm="${i}">Sì, esegui: ${esc(m.pendingLabel || "procedi")}</button><button class="btn ghost small" data-dismiss="${i}">No</button></div>`
     : m.confirmed ? `<div class="confirm-note">Confermato: ${esc(m.pendingLabel || "")}</div>` : ""}</div>`).join("")
     || `<p class="hint">${S.mode === "dialog" ? "Esempio: \"ho questa scaletta, voglio al massimo quattro patch: una pulita, una crunch anni '90, una distorta, una per i lenti\"." : "Quando il preset è pronto puoi chiedere modifiche, come faresti con un tecnico del suono."}</p>`;
@@ -716,6 +762,24 @@ async function dialogTurn(text) {
   return res.reply;
 }
 
+/* annulla l'ultima modifica dell'AI / togli l'evidenziazione */
+$("#changeBar").addEventListener("click", (e) => {
+  const s = song();
+  if (!s) return;
+  if (e.target.id === "undoAi" && s.prev_recipe) {
+    s.recipe = s.prev_recipe;
+    s.prev_recipe = null;
+    s.last_changes = null;
+    (s.chat || (s.chat = [])).push({ who: "ai", text: "Ho annullato l'ultima modifica: il preset è tornato com'era prima." });
+    recipeChanged();
+    renderAssist();
+  } else if (e.target.id === "clearChg") {
+    s.last_changes = null;
+    renderBoard();
+    saveSoon();
+  }
+});
+
 /* conferma con un clic di un'azione proposta dall'AI */
 $("#chat").addEventListener("click", async (e) => {
   const b = e.target.closest("[data-confirm],[data-dismiss]");
@@ -757,7 +821,7 @@ async function executeAction(action) {
   } else {
     await openSetlist(S.setlist.id, res.song_index);
     switchTab("preset");
-    log.push({ who: "ai", text: res.reply || "Fatto: il preset è aggiornato." });
+    log.push({ who: "ai", text: res.reply || "Fatto: il preset è aggiornato.", changes: res.changes });
   }
   renderAssist();
   saveSoon();
@@ -829,9 +893,11 @@ async function sendChat(e) {
     const stop = working($("#chat"), "Applico la modifica…", [$("#chatSend")]);
     let res;
     try { res = await api("POST", "/api/edit", { recipe: s.recipe, instruction: text }); } finally { stop(); }
+    s.prev_recipe = s.recipe;
     s.recipe = res.recipe;
+    s.last_changes = res.changes;
     s.warnings = res.warnings || [];
-    s.chat.push({ who: "ai", text: res.reply || "Modifica applicata." });
+    s.chat.push({ who: "ai", text: res.reply || "Modifica applicata.", changes: res.changes });
     if (res.research) { s.research = res.research; s.sources = res.sources || []; }
     recipeChanged();
     renderMeters(res.dsp);

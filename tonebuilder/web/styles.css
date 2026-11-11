@@ -379,3 +379,13 @@ code { background: var(--tolex); padding: 1px 5px; border-radius: 3px; font-size
 .jobmeter { height: 4px; background: var(--line); border-radius: 2px; margin-top: 6px; overflow: hidden; }
 .jobmeter span { display: block; height: 100%; background: var(--lamp); transition: width .4s; }
 .confirm-row .btn { white-space: normal; text-align: left; max-width: 100%; }
+
+/* cosa ha cambiato l'AI */
+.changes { margin-top: 8px; font-size: 13px; }
+.changes summary { cursor: pointer; color: var(--lamp); font-weight: 600; }
+.changes ul { margin: 6px 0 0; padding-left: 18px; display: grid; gap: 3px; }
+.changebar { border: 1px solid var(--lamp); border-radius: var(--radius-s); padding: 10px 12px; margin-bottom: 12px; background: var(--tolex-2); }
+.changebar .cb-row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; font-size: 14px; }
+.changebar .cb-row span { flex: 1 1 240px; }
+.pedal.changed { outline: 2px solid var(--lamp); outline-offset: 2px; box-shadow: 0 0 14px rgba(242,169,59,.45); }
+#matrix td.chg { box-shadow: inset 0 0 0 2px var(--lamp); }

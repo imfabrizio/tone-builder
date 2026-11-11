@@ -743,10 +743,13 @@ def api_dialog_execute(body: ActionIn) -> dict:
                              "links": sources.search_links(req.artist, req.title)})
         except AIError as e:
             _err(e)
+        if song.get("recipe"):
+            song["prev_recipe"] = song["recipe"]  # per "Annulla modifica"
         song["recipe"] = res.recipe.model_dump()
         song["warnings"] = res.warnings
+        song["last_changes"] = res.changes
         _save_sl(data)
-        return {"done": True, "song_index": idx, "reply": getattr(res, "reply", "")}
+        return {"done": True, "song_index": idx, "reply": getattr(res, "reply", ""), "changes": res.changes}
     if kind == "analyze_youtube":
         return {"job": "youtube", **start_youtube(sid)}
     if kind == "design_all":
