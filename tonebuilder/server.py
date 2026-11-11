@@ -463,6 +463,8 @@ def design_all(sid: str, body: dict | None = None) -> dict:
     def work() -> None:
         try:
             for n, i in enumerate(todo, 1):
+                if job.get("cancel"):
+                    break
                 cur = json.loads(_setlist_path(sid).read_text(encoding="utf-8"))
                 if i >= len(cur["songs"]) or (cur["songs"][i].get("recipe") and not redo):
                     continue
@@ -509,7 +511,7 @@ def _start_job(key: str, total: int, work) -> dict[str, Any]:
     job = _jobs.get(key)
     if job and job.get("running"):
         return job
-    job = {"running": True, "done": 0, "total": total, "current": "", "errors": [], "result": None}
+    job = {"running": True, "done": 0, "total": total, "current": "", "errors": [], "result": None, "cancel": False}
     _jobs[key] = job
 
     def run() -> None:
@@ -525,6 +527,17 @@ def _start_job(key: str, total: int, work) -> dict[str, Any]:
     return job
 
 
+@app.post("/api/jobs/{sid}/{kind}/cancel")
+def cancel_job(sid: str, kind: str) -> dict:
+    """Ferma un lavoro: finisce l'elemento in corso e non inizia i successivi (quelli gia' fatti restano)."""
+    job = _jobs.get(f"{sid}:{kind}")
+    if not job or not job.get("running"):
+        return {"ok": False}
+    job["cancel"] = True
+    job["current"] = "mi fermo dopo questo…"
+    return {"ok": True}
+
+
 JOB_LABELS = {"youtube": "Ascolto dei brani da YouTube", "design-all": "Creazione dei preset",
               "generic": "Creazione delle patch generiche", "edit-many": "Modifica di tutti i preset"}
 
@@ -535,7 +548,8 @@ def jobs_summary(sid: str) -> list[dict]:
         j = _jobs.get(f"{sid}:{kind}")
         if j:
             out.append({"kind": kind, "label": label, "running": j.get("running", False), "done": j.get("done", 0),
-                        "total": j.get("total", 0), "current": j.get("current", ""), "errors": len(j.get("errors", []))})
+                        "total": j.get("total", 0), "current": j.get("current", ""), "errors": len(j.get("errors", [])),
+                        "cancelled": bool(j.get("cancel"))})
     return out
 
 
@@ -578,6 +592,8 @@ def start_youtube(sid: str) -> dict:
 
     def work(job):
         for n, song_id in enumerate(todo, 1):
+            if job.get("cancel"):
+                break
             cur = _load_sl(sid)
             song = next((x for x in cur["songs"] if x.get("id") == song_id), None)
             if song is None:
@@ -669,6 +685,8 @@ def start_generic(sid: str, proposal: dict) -> dict:
     def work(job):
         made = []
         for n, g in enumerate(groups, 1):
+            if job.get("cancel"):
+                break
             job["current"] = g["name"]
             try:
                 req = planner.generic_request(g, snapshot_songs, gear_text, bool(proposal.get("use_iridium")))
@@ -739,6 +757,8 @@ def start_edit_many(sid: str, instruction: str, target: Any = "all") -> dict:
 
     def work(job):
         for n, song_id in enumerate(ids, 1):
+            if job.get("cancel"):
+                break
             cur = _load_sl(sid)
             song = next((x for x in cur["songs"] if x.get("id") == song_id), None)
             if not song or not song.get("recipe"):

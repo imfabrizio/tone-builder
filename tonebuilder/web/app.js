@@ -868,11 +868,12 @@ async function refreshJobBar() {
     if (j.running) {
       jobSeen[key] = "running";
       const pct = j.total ? Math.round((j.done / j.total) * 100) : 0;
-      rows.push(`<div class="job run"><span class="dots" aria-hidden="true"><i></i><i></i><i></i></span><div><strong>${esc(j.label)}</strong>: ${j.done} di ${j.total}${j.current ? ` — ${esc(j.current)}` : ""}<div class="jobmeter"><span style="width:${pct}%"></span></div></div></div>`);
+      rows.push(`<div class="job run"><span class="dots" aria-hidden="true"><i></i><i></i><i></i></span><div class="grow"><strong>${esc(j.label)}</strong>: ${j.done} di ${j.total}${j.current ? ` — ${esc(j.current)}` : ""}<div class="jobmeter"><span style="width:${pct}%"></span></div></div>${
+        j.cancelled ? `<span class="hint">mi sto fermando…</span>` : `<button class="btn ghost small" data-stop-job="${j.kind}">Ferma</button>`}</div>`);
     } else if (jobSeen[key] === "running" || jobSeen[key] === "done") {
       if (jobSeen[key] === "running") finished = true;
       jobSeen[key] = "done";
-      rows.push(`<div class="job ok"><strong>${esc(j.label)}</strong>: completato, ${j.done} di ${j.total}${j.errors ? `, ${j.errors} problemi` : ""}</div>`);
+      rows.push(`<div class="job ok"><strong>${esc(j.label)}</strong>: ${j.cancelled ? "fermato" : "completato"}, ${j.done} di ${j.total}${j.errors ? `, ${j.errors} problemi` : ""}</div>`);
     }
   }
   bar.innerHTML = rows.join("");
@@ -880,23 +881,42 @@ async function refreshJobBar() {
   if (finished && $("#busy").classList.contains("hidden")) await openSetlist(S.setlist.id, S.songIdx);
 }
 setInterval(refreshJobBar, 4000);
+$("#jobBar").addEventListener("click", (e) => {
+  const k = e.target.dataset.stopJob;
+  if (k) { e.target.disabled = true; stopJob(k).catch((err) => toast(err.message, true)); }
+});
 
 /* lavori lunghi: avanzamento a schermo */
+async function stopJob(kind) {
+  if (!S.setlist) return;
+  await api("POST", `/api/jobs/${S.setlist.id}/${kind}/cancel`);
+  toast("Mi fermo appena finito quello in corso: quelli già fatti restano");
+  refreshJobBar();
+}
+
 async function pollJob(kind, label) {
   const url = kind === "design-all" ? `/api/setlists/${S.setlist.id}/design-all` : `/api/jobs/${S.setlist.id}/${kind}`;
   $("#busy").classList.remove("hidden");
   $("#busyText").textContent = `${label}…`;
+  const stop = $("#busyStop"), hide = $("#busyHide");
+  stop.classList.remove("hidden"); hide.classList.remove("hidden");
+  stop.disabled = false;
+  let hidden = false;
+  stop.onclick = () => { stop.disabled = true; stopJob(kind).catch((e) => toast(e.message, true)); };
+  hide.onclick = () => { hidden = true; $("#busy").classList.add("hidden"); };
   refreshJobBar();
   let j;
   for (;;) {
     try { j = await api("GET", url); } catch (e) { j = { running: false, errors: [e.message] }; }
     if (!j.running) break;
-    $("#busyText").textContent = `${label}: ${j.done} di ${j.total}${j.current ? " — " + j.current : ""}`;
+    if (!hidden) $("#busyText").textContent = `${label}: ${j.done} di ${j.total}${j.current ? " — " + j.current : ""}`;
     await new Promise((r) => setTimeout(r, 2000));
   }
   $("#busy").classList.add("hidden");
+  stop.classList.add("hidden"); hide.classList.add("hidden");
   await openSetlist(S.setlist.id, S.songIdx);
-  if (j.errors?.length) toast(`Completato con ${j.errors.length} problemi: ${j.errors[0]}`, true);
+  if (j.cancel) toast(`${label}: fermato dopo ${j.done} di ${j.total}`);
+  else if (j.errors?.length) toast(`Completato con ${j.errors.length} problemi: ${j.errors[0]}`, true);
   else toast(`${label}: fatto`);
   return j;
 }

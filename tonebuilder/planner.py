@@ -283,8 +283,18 @@ def _guard_action(action: dict, setlist: dict | None, last: str) -> tuple[dict, 
             return {"type": "edit_song", "song_index": idx, "instruction": instr}, ""
     if t == "generic_patches" and any(x.get("kind") == "patch" for x in songs) and not _REDO.search(last):
         return {"type": "edit_many", "target": "patches", "instruction": action.get("notes") or last}, ""
-    if t == "design_all" and action.get("redo") and not _REDO.search(last):
-        return {**action, "redo": False}, ""
+    if t == "design_all":
+        # "fammi 5 patch" non vuol dire "un preset per ogni brano"
+        m = re.search(r"\b(\d{1,2}|due|tre|quattro|cinque|sei|sette|otto)\s+(patch|suoni|preset generic\w*)", last, re.I)
+        if m or re.search(r"\bpatch\b.*\bgeneric|\bgeneric\w*\b.*\bpatch|\bridu", last, re.I):
+            words = {"due": 2, "tre": 3, "quattro": 4, "cinque": 5, "sei": 6, "sette": 7, "otto": 8}
+            n = 4
+            if m:
+                n = int(m.group(1)) if m.group(1).isdigit() else words[m.group(1).lower()]
+            return {"type": "generic_patches", "max_patches": max(1, min(8, n)),
+                    "notes": action.get("description") or ""}, ""
+        if action.get("redo") and not _REDO.search(last):
+            return {**action, "redo": False}, ""
     return action, ""
 
 
@@ -303,8 +313,11 @@ def describe_action(action: dict, setlist: dict | None = None) -> str:
             label += f": {str(action['instruction'])[:80]}"
     if action.get("type") == "edit_song" and action.get("instruction"):
         label += f": {str(action['instruction'])[:80]}"
-    if action.get("type") == "design_all" and action.get("redo"):
-        label = "Rifare da zero i preset di tutti i brani"
+    if action.get("type") == "design_all":
+        songs = [x for x in (setlist or {}).get("songs", []) if x.get("kind") != "patch" and not x.get("uses_patch")]
+        n = len(songs) if action.get("redo") else len([x for x in songs if not x.get("recipe")])
+        label = (f"Rifare da zero {n} preset, uno per ogni brano" if action.get("redo")
+                 else f"Creare {n} preset, uno per ogni brano (non patch generiche)")
     return label[0].upper() + label[1:]
 
 

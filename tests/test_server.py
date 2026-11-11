@@ -272,3 +272,35 @@ def test_edit_many_overview_and_guard(recipe, monkeypatch, tmp_path):
     ov = c.get(f"/api/setlists/{sl['id']}/overview").json()
     assert ov[0]["has_recipe"] and any(b["ir"] for b in ov[0]["blocks"]) and ov[1]["uses_patch_name"] == "Crunch"
     assert [j["kind"] for j in c.get(f"/api/setlists/{sl['id']}/jobs").json()] == ["edit-many"]
+
+
+def test_cancel_job_and_patch_count_guard(recipe, monkeypatch):
+    import threading
+    import time
+    from tonebuilder import planner
+
+    gate = threading.Event()
+
+    class SlowAI(StubAI):
+        def complete_json(self, system, user, *, audio_path=None):
+            gate.wait(2)
+            return recipe.model_dump()
+
+    monkeypatch.setattr(srv, "_provider", lambda name=None: SlowAI(recipe.model_dump()))
+    c = TestClient(srv.app)
+    sl = c.post("/api/setlists/import", json={"text": "\n".join(f"A - Brano {i}" for i in range(6)), "name": "c"}).json()
+    c.post(f"/api/setlists/{sl['id']}/design-all", json={})
+    assert c.post(f"/api/jobs/{sl['id']}/design-all/cancel").json()["ok"]
+    gate.set()
+    for _ in range(50):
+        st = c.get(f"/api/setlists/{sl['id']}/design-all").json()
+        if not st["running"]:
+            break
+        time.sleep(0.1)
+    assert st["cancel"] and st["done"] <= 1
+
+    act, _ = planner._guard_action({"type": "design_all"}, sl, "fammi 5 patch per tutta la scaletta")
+    assert act == {"type": "generic_patches", "max_patches": 5, "notes": ""}
+    act, _ = planner._guard_action({"type": "design_all"}, sl, "crea i preset di ogni brano")
+    assert act["type"] == "design_all"
+    assert "6 preset" in planner.describe_action({"type": "design_all"}, sl)
