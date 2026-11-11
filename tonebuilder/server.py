@@ -29,6 +29,8 @@ from .catalogs.quadcortex import QCCatalog
 from .config import ProviderSettings, Settings, app_home, load_settings, public_view, save_settings
 from . import gear as gearmod
 from . import spotify
+from . import planner
+from .ai import get_provider
 from .designer import DesignRequest, describe_audio, design, edit, suggest_guitars
 from .importers import import_file
 from .merge import Pick, merge
@@ -368,14 +370,15 @@ _jobs: dict[str, dict[str, Any]] = {}
 @app.post("/api/setlists/{sid}/design-all")
 def design_all(sid: str, body: dict | None = None) -> dict:
     """Crea in background i preset di tutti i brani che non ce l'hanno."""
-    job = _jobs.get(sid)
+    job = _jobs.get(f"{sid}:design-all")
     if job and job.get("running"):
         return job
     data = get_setlist(sid)
-    todo = [i for i, s in enumerate(data["songs"]) if not s.get("recipe")]
+    todo = [i for i, s in enumerate(data["songs"]) if not s.get("recipe") and not s.get("uses_patch")
+            and s.get("kind") != "patch"]
     default_desc = (body or {}).get("description") or ""
-    job = {"running": True, "done": 0, "total": len(todo), "current": "", "errors": []}
-    _jobs[sid] = job
+    job = {"running": True, "done": 0, "total": len(todo), "current": "", "errors": [], "result": None}
+    _jobs[f"{sid}:design-all"] = job
     prov = _provider()
     settings = load_settings()
     gear_text = gearmod.describe_for_ai(gearmod.load_gear())
@@ -417,7 +420,254 @@ def design_all(sid: str, body: dict | None = None) -> dict:
 
 @app.get("/api/setlists/{sid}/design-all")
 def design_all_status(sid: str) -> dict:
-    return _jobs.get(sid, {"running": False, "done": 0, "total": 0, "errors": []})
+    return _jobs.get(f"{sid}:design-all", {"running": False, "done": 0, "total": 0, "errors": []})
+
+
+# ------------------------------------------------------------------ lavori lunghi in background
+
+def _start_job(key: str, total: int, work) -> dict[str, Any]:
+    job = _jobs.get(key)
+    if job and job.get("running"):
+        return job
+    job = {"running": True, "done": 0, "total": total, "current": "", "errors": [], "result": None}
+    _jobs[key] = job
+
+    def run() -> None:
+        try:
+            job["result"] = work(job)
+        except Exception as e:
+            job["errors"].append(str(e))
+            print(f"[errore] {e}", flush=True)
+        finally:
+            job["running"] = False
+
+    threading.Thread(target=run, daemon=True).start()
+    return job
+
+
+@app.get("/api/jobs/{sid}/{kind}")
+def job_status(sid: str, kind: str) -> dict:
+    return _jobs.get(f"{sid}:{kind}", {"running": False, "done": 0, "total": 0, "errors": [], "result": None})
+
+
+def _load_sl(sid: str) -> dict:
+    return json.loads(_setlist_path(sid).read_text(encoding="utf-8"))
+
+
+def _save_sl(data: dict) -> None:
+    _setlist_path(data["id"]).write_text(json.dumps(data, ensure_ascii=False, indent=1), encoding="utf-8")
+
+
+# ------------------------------------------------------------------ YouTube: analisi di tutta la scaletta
+
+def start_youtube(sid: str) -> dict:
+    data = get_setlist(sid)
+    todo = [s["id"] for s in data["songs"] if s.get("kind") != "patch" and s.get("title")
+            and not (s.get("audio") or {}).get("analysis")]
+    prov = _provider()
+
+    def work(job):
+        for n, song_id in enumerate(todo, 1):
+            cur = _load_sl(sid)
+            song = next((x for x in cur["songs"] if x.get("id") == song_id), None)
+            if song is None:
+                continue
+            job["current"] = f"{song.get('artist', '')} - {song.get('title', '')}"
+            wdir = _dir("audio") / uuid.uuid4().hex[:10]
+            wdir.mkdir()
+            try:
+                path, info = metadata.search_and_download(song.get("artist", ""), song.get("title", ""), wdir)
+                res = _analyze_file(wdir, path, info, ["Audio cercato e scaricato da YouTube (uso personale)."],
+                                    True, prov)
+                cur = _load_sl(sid)
+                tgt = next((x for x in cur["songs"] if x.get("id") == song_id), None)
+                if tgt is not None:
+                    tgt["audio"] = res
+                    _save_sl(cur)
+            except Exception as e:
+                job["errors"].append(f"{job['current']}: {e}")
+                print(f"[errore] {job['current']}: {e}", flush=True)
+            job["done"] = n
+        return {"analyzed": len(todo) - len(job["errors"])}
+
+    return _start_job(f"{sid}:youtube", len(todo), work)
+
+
+@app.post("/api/setlists/{sid}/youtube")
+def api_youtube(sid: str) -> dict:
+    try:
+        return start_youtube(sid)
+    except HTTPException:
+        raise
+    except Exception as e:
+        _err(e)
+
+
+# ------------------------------------------------------------------ patch generiche
+
+class GroupIn(BaseModel):
+    max_patches: int = 4
+    notes: str = ""
+
+
+@app.post("/api/setlists/{sid}/group-proposal")
+def api_group_proposal(sid: str, body: GroupIn) -> dict:
+    data = get_setlist(sid)
+    try:
+        return planner.propose_groups(data["songs"], max(1, min(8, body.max_patches)), body.notes,
+                                      gearmod.describe_for_ai(gearmod.load_gear()), _provider())
+    except AIError as e:
+        _err(e)
+
+
+class GenericIn(BaseModel):
+    proposal: dict
+
+
+def start_generic(sid: str, proposal: dict) -> dict:
+    groups = proposal.get("patches") or []
+    if not groups:
+        _err(ValueError("Nessuna patch da creare"))
+    prov = _provider()
+    gear_text = gearmod.describe_for_ai(gearmod.load_gear())
+    snapshot_songs = get_setlist(sid)["songs"]
+    groups = [{**g, "song_ids": [snapshot_songs[r["index"]]["id"] for r in g["songs"] if 0 <= r["index"] < len(snapshot_songs)]}
+              for g in groups]
+
+    def work(job):
+        made = []
+        for n, g in enumerate(groups, 1):
+            job["current"] = g["name"]
+            try:
+                req = planner.generic_request(g, snapshot_songs, gear_text)
+                res = design(req, prov, web_research=False)
+                cur = _load_sl(sid)
+                pid = uuid.uuid4().hex[:8]
+                by_id = {x.get("id"): x for x in cur["songs"]}
+                covered = []
+                for r, song_id in zip(g["songs"], g["song_ids"]):
+                    song = by_id.get(song_id)
+                    if song is None:
+                        continue
+                    song.update({"uses_patch": pid, "uses_patch_name": g["name"], "patch_usage": r.get("usage", "")})
+                    covered.append(f"{song.get('artist', '')} - {song.get('title', '')}")
+                entry = {"id": pid, "kind": "patch", "title": g["name"], "artist": "Patch generica",
+                         "request": {"description": g.get("description", ""), "snapshots": g.get("snapshots", ""),
+                                     "guitar": g.get("guitar", "")},
+                         "covers": covered, "audio": None, "recipe": res.recipe.model_dump(), "research": "",
+                         "sources": [], "links": [], "warnings": res.warnings,
+                         "chat": [{"who": "ai", "text": f"Patch generica per {len(covered)} brani. Dimmi cosa ritoccare."}]}
+                first_song = next((i for i, x in enumerate(cur["songs"]) if x.get("kind") != "patch"), len(cur["songs"]))
+                cur["songs"].insert(first_song, entry)
+                _save_sl(cur)
+                made.append(g["name"])
+            except Exception as e:
+                job["errors"].append(f"{g['name']}: {e}")
+                print(f"[errore] {g['name']}: {e}", flush=True)
+            job["done"] = n
+        return {"patches": made}
+
+    return _start_job(f"{sid}:generic", len(groups), work)
+
+
+@app.post("/api/setlists/{sid}/generic-patches")
+def api_generic(sid: str, body: GenericIn) -> dict:
+    return start_generic(sid, body.proposal)
+
+
+# ------------------------------------------------------------------ voce e dialogo
+
+@app.post("/api/voice/transcribe")
+async def voice_transcribe(file: UploadFile = File(...)) -> dict:
+    s = load_settings()
+    gem = s.providers.get("gemini")
+    if not gem or not gem.api_key:
+        _err(AIError("Per la voce su questo browser serve la chiave Gemini (Impostazioni > AI > Gemini). "
+                     "In alternativa usa Chrome o Edge."))
+    ext = Path(file.filename or "voce.webm").suffix or ".webm"
+    wdir = _dir("voice")
+    for old in sorted(wdir.glob("*"), key=lambda p: p.stat().st_mtime)[:-20]:
+        old.unlink(missing_ok=True)
+    path = wdir / f"{uuid.uuid4().hex[:8]}{ext}"
+    path.write_bytes(await file.read())
+    try:
+        path = analysis.ensure_wav(path)
+        text = get_provider(s, "gemini").complete_text("Sei un trascrittore accurato.", planner.transcribe_prompt(),
+                                                        audio_path=str(path))
+    except Exception as e:
+        _err(e)
+    return {"text": text.strip().strip('"')}
+
+
+class DialogIn(BaseModel):
+    setlist_id: str
+    current: int | None = None
+    history: list[dict]
+
+
+@app.post("/api/dialog")
+def api_dialog(body: DialogIn) -> dict:
+    data = get_setlist(body.setlist_id)
+    ctx = planner.setlist_context(data, body.current, gearmod.describe_for_ai(gearmod.load_gear()))
+    try:
+        return planner.converse(body.history, ctx, _provider())
+    except AIError as e:
+        _err(e)
+
+
+class ActionIn(BaseModel):
+    setlist_id: str
+    action: dict
+
+
+@app.post("/api/dialog/execute")
+def api_dialog_execute(body: ActionIn) -> dict:
+    sid, a = body.setlist_id, body.action
+    kind = a.get("type")
+    data = get_setlist(sid)
+    gear_text = gearmod.describe_for_ai(gearmod.load_gear())
+    if kind in ("design_song", "edit_song"):
+        try:
+            idx = int(a.get("song_index"))
+            song = data["songs"][idx]
+        except (TypeError, ValueError, IndexError):
+            _err(ValueError("Brano non trovato"))
+        try:
+            if kind == "edit_song" and song.get("recipe"):
+                res = edit(ToneRecipe.model_validate(song["recipe"]), str(a.get("instruction") or ""), _provider(),
+                           web_research=load_settings().web_research)
+            else:
+                rq = song.get("request") or {}
+                for k in ("description", "snapshots", "guitar", "gear_preferences"):
+                    if a.get(k):
+                        rq[k] = str(a[k])
+                song["request"] = rq
+                req = DesignRequest(title=song.get("title", ""), artist=song.get("artist", ""),
+                                    description=rq.get("description") or str(a.get("instruction") or ""),
+                                    guitar=rq.get("guitar", ""), snapshots=rq.get("snapshots", ""),
+                                    gear_preferences=rq.get("gear_preferences", ""), gear=gear_text,
+                                    audio_analysis=(song.get("audio") or {}).get("analysis", ""))
+                res = design(req, _provider(), web_research=load_settings().web_research)
+                song.update({"research": res.research, "sources": res.sources,
+                             "links": sources.search_links(req.artist, req.title)})
+        except AIError as e:
+            _err(e)
+        song["recipe"] = res.recipe.model_dump()
+        song["warnings"] = res.warnings
+        _save_sl(data)
+        return {"done": True, "song_index": idx, "reply": getattr(res, "reply", "")}
+    if kind == "analyze_youtube":
+        return {"job": "youtube", **start_youtube(sid)}
+    if kind == "design_all":
+        return {"job": "design-all", **design_all(sid, {"description": a.get("description", "")})}
+    if kind == "generic_patches":
+        try:
+            prop = planner.propose_groups(data["songs"], max(1, min(8, int(a.get("max_patches") or 4))),
+                                          str(a.get("notes") or ""), gear_text, _provider())
+        except AIError as e:
+            _err(e)
+        return {"job": "generic", "proposal": prop, **start_generic(sid, prop)}
+    _err(ValueError(f"Azione sconosciuta: {kind}"))
 
 
 # ------------------------------------------------------------------ audio
@@ -443,11 +693,16 @@ async def audio_analyze(file: UploadFile | None = File(default=None), url: str =
             raise ValueError("Carica un file audio o incolla un link")
     except Exception as e:
         _err(e)
-
-    result: dict[str, Any] = {"track": info.to_dict(), "analysis": "", "features": {}, "notes": notes,
-                              "audio_id": work.name if audio_path else None}
     if audio_path is None:
-        return result
+        return {"track": info.to_dict(), "analysis": "", "features": {}, "notes": notes, "audio_id": None}
+    return _analyze_file(work, audio_path, info, notes, separate)
+
+
+def _analyze_file(work: Path, audio_path: Path, info, notes: list[str], separate: bool = True,
+                  provider=None) -> dict[str, Any]:
+    """Converte, (se possibile) isola la chitarra, misura e fa descrivere il suono all'AI."""
+    result: dict[str, Any] = {"track": info.to_dict(), "analysis": "", "features": {}, "notes": notes,
+                              "audio_id": work.name}
     try:
         audio_path = analysis.ensure_wav(audio_path)
     except Exception as e:
@@ -471,7 +726,7 @@ async def audio_analyze(file: UploadFile | None = File(default=None), url: str =
         except Exception as e:
             notes.append(f"Misure audio non riuscite: {e}")
     try:
-        result["analysis"] = describe_audio(_provider(), str(target), ftxt) or ftxt
+        result["analysis"] = describe_audio(provider or _provider(), str(target), ftxt) or ftxt
     except (AIError, HTTPException) as e:
         notes.append(f"Analisi AI non riuscita: {getattr(e, 'detail', e)}")
         result["analysis"] = ftxt

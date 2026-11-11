@@ -331,3 +331,16 @@ legend { padding: 0 6px; font-weight: 700; }
 .guitar-card .editor-head h3 { font-size: 15px; }
 code { background: var(--tolex); padding: 1px 5px; border-radius: 3px; font-size: 12px; }
 #guitarReason { margin: 2px 0 0; }
+
+/* patch generiche nella scaletta */
+.songs li.patch { border-left: 3px solid var(--lamp); }
+.songs li.patch .a { color: var(--lamp); }
+.songs .uses { display: block; font-size: 11px; color: var(--lamp); font-weight: 600; }
+.mode-seg { width: 100%; }
+.mode-seg button { flex: 1; }
+#talkBtn.listening { background: var(--bad); border-color: var(--bad); color: #fff; animation: pulse 1.2s ease-in-out infinite; }
+#talkBtn.thinking { opacity: .6; }
+#talkBtn.speaking { background: var(--good); border-color: var(--good); color: #10151a; }
+.group-card { border: 1px solid var(--line); border-radius: var(--radius-m); padding: 10px 12px; margin: 8px 0; background: var(--tolex); }
+.group-card h3 { margin: 0 0 4px; font-size: 15px; }
+.group-card ul { margin: 6px 0 0; padding-left: 18px; font-size: 13px; color: var(--ink-2); }

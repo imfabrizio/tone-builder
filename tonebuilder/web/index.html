@@ -27,7 +27,9 @@
     <ol class="songs" id="songList"></ol>
     <button class="btn wide" id="addSong">Aggiungi brano</button>
     <button class="btn wide ghost" id="openImport">Importa scaletta</button>
+    <button class="btn wide ghost" id="ytAll">Ascolta i brani da YouTube</button>
     <button class="btn wide ghost" id="suggestGuitars">Proponi le chitarre</button>
+    <button class="btn wide ghost" id="openReduce">Riduci a patch generiche</button>
     <button class="btn wide ghost" id="designAll">Crea tutti i preset</button>
     <button class="btn wide ghost" id="openMerge">Unisci suoni da più preset</button>
   </aside>
@@ -95,6 +97,7 @@
       <!-- preset -->
       <div class="tabpanel hidden" id="tab-preset">
         <div class="no-preset" id="noPreset">Nessun preset ancora: compila "Progetta" e premi Crea il preset, oppure importa un file.</div>
+        <div class="result hidden" id="patchInfo"></div>
         <div id="presetBody" class="hidden">
           <div class="preset-top">
             <input class="preset-name" id="presetName" aria-label="Nome del preset">
@@ -127,11 +130,19 @@
 
   <!-- assistente -->
   <aside class="assist" aria-label="Assistente">
-    <h2 class="sec">Modifica a parole</h2>
+    <div class="seg mode-seg" role="tablist" aria-label="Modalità">
+      <button type="button" data-mode="dialog" class="active">Dialogo</button>
+      <button type="button" data-mode="edit">Modifica diretta</button>
+    </div>
+    <p class="hint" id="modeHint"></p>
     <div class="chat" id="chat"></div>
     <form class="chat-form" id="chatForm">
       <textarea id="chatInput" rows="2" placeholder="Es. più gain nell'assolo, metti il delay sul footswitch 4"></textarea>
-      <button class="btn primary" type="submit">Applica</button>
+      <div class="row">
+        <button class="btn primary" type="submit" id="chatSend" style="flex:1">Invia</button>
+        <button class="btn" type="button" id="talkBtn" title="Conversazione a voce: parli, ti risponde a voce, ascolta di nuovo">Parla</button>
+      </div>
+      <label class="check"><input type="checkbox" id="speakReplies" checked> Leggi ad alta voce le risposte</label>
     </form>
     <details class="research" id="researchBox">
       <summary>Ricerca e fonti</summary>
@@ -238,6 +249,23 @@
     <div class="dlg-actions">
       <button class="btn ghost" id="importClose">Chiudi</button>
       <button class="btn primary" id="importRun">Importa</button>
+    </div>
+  </div>
+</dialog>
+
+<dialog id="reduceDlg" class="dlg wide">
+  <div class="dlg-body">
+    <h2>Riduci a patch generiche</h2>
+    <p class="hint">Raggruppo i brani con suono simile e creo poche patch complete (due linee piene, più ampli dove serve, 6-8 snapshot) che li coprono tutti. Per ogni brano ti dico quale snapshot usare in strofa, ritornello e assolo. Se hai già ascoltato i brani da YouTube, la proposta è più precisa.</p>
+    <div class="row">
+      <div class="field" style="width:160px"><label for="reduceMax">Numero massimo di patch</label><input id="reduceMax" type="number" min="1" max="8" value="4"></div>
+      <div class="field" style="flex:1"><label for="reduceNotes">Indicazioni</label><input id="reduceNotes" placeholder="Es. una patch per i pezzi puliti, una per il rock 90's, una per i pezzi distorti"></div>
+    </div>
+    <button class="btn" id="reducePropose">Proponi i gruppi</button>
+    <div id="reduceResult"></div>
+    <div class="dlg-actions">
+      <button class="btn ghost" id="reduceClose">Chiudi</button>
+      <button class="btn primary hidden" id="reduceCreate">Crea queste patch</button>
     </div>
   </div>
 </dialog>

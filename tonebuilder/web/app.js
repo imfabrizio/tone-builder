@@ -98,6 +98,11 @@ function saveSoon() {
   }, 500);
 }
 
+async function saveNow() {
+  clearTimeout(saveTimer);
+  if (S.setlist) await api("PUT", `/api/setlists/${S.setlist.id}`, S.setlist);
+}
+
 let checkTimer = null;
 function recipeChanged() {
   renderPreset();
@@ -141,11 +146,12 @@ async function loadSetlists(selectId) {
   await openSetlist(pick.id);
 }
 
-async function openSetlist(id) {
+async function openSetlist(id, keepIdx) {
   S.setlist = await api("GET", `/api/setlists/${id}`);
   try { localStorage.setItem("tb.setlist", id); } catch {}
   $("#setlistSelect").value = id;
   S.songIdx = S.setlist.songs.length ? 0 : -1;
+  if (keepIdx != null && keepIdx >= 0 && keepIdx < S.setlist.songs.length) S.songIdx = keepIdx;
   renderSongs();
   openSong(S.songIdx);
 }
@@ -153,9 +159,9 @@ async function openSetlist(id) {
 function renderSongs() {
   const list = $("#songList");
   list.innerHTML = S.setlist.songs.map((s, i) => `
-    <li class="${i === S.songIdx ? "active" : ""}" data-i="${i}">
-      <span class="t">${esc(s.title || "Senza titolo")}<span class="a">${esc(s.artist || "")}</span></span>
-      <span class="dot ${s.recipe ? "ready" : ""}" title="${s.recipe ? "Preset pronto" : "Da progettare"}"></span>
+    <li class="${i === S.songIdx ? "active" : ""} ${s.kind === "patch" ? "patch" : ""}" data-i="${i}">
+      <span class="t">${esc(s.title || "Senza titolo")}<span class="a">${esc(s.artist || "")}</span>${s.uses_patch ? `<span class="uses">Patch: ${esc(s.uses_patch_name || "")}</span>` : ""}</span>
+      <span class="dot ${s.recipe || s.uses_patch ? "ready" : ""}" title="${s.recipe ? "Preset pronto" : s.uses_patch ? "Usa una patch generica" : "Da progettare"}"></span>
       <button class="del" data-del="${i}" aria-label="Elimina brano">✕</button>
     </li>`).join("");
 }
@@ -187,7 +193,7 @@ function openSong(i) {
   $("#reqSnapshots").value = rq.snapshots || "";
   $("#guitarReason").textContent = s.guitar_reason || "";
   renderAnalysis();
-  switchTab(s.recipe ? "preset" : "design");
+  switchTab(s.recipe || s.uses_patch ? "preset" : "design");
   renderPreset();
   renderAssist();
   if (s.recipe) recipeChanged();
@@ -286,9 +292,26 @@ function renderMeters(d) {
   $("#meters").innerHTML = m("Helix (1 percorso)", d.helix, d.budget.helix) + m("Quad Cortex", d.qc, d.budget.qc);
 }
 
+function renderPatchInfo() {
+  const s = song();
+  const box = $("#patchInfo");
+  if (!s) { box.classList.add("hidden"); return; }
+  if (s.kind === "patch") {
+    box.innerHTML = `<strong>Patch generica</strong> per ${(s.covers || []).length} brani:<ul>${(s.covers || []).map((c) => `<li>${esc(c)}</li>`).join("")}</ul>`;
+    box.classList.remove("hidden");
+  } else if (s.uses_patch) {
+    box.innerHTML = `<strong>Questo brano usa la patch generica "${esc(s.uses_patch_name || "")}".</strong>
+      ${s.patch_usage ? `<p class="hint">${esc(s.patch_usage)}</p>` : ""}
+      <div class="row"><button class="btn" data-open-patch="${esc(s.uses_patch)}">Apri la patch</button>
+      ${s.recipe ? "" : `<span class="hint">Se questo brano ha bisogno di una patch sua, usa Progetta.</span>`}</div>`;
+    box.classList.remove("hidden");
+  } else box.classList.add("hidden");
+}
+
 function renderPreset() {
   const r = recipe();
-  $("#noPreset").classList.toggle("hidden", !!r);
+  renderPatchInfo();
+  $("#noPreset").classList.toggle("hidden", !!r || !!song()?.uses_patch);
   $("#presetBody").classList.toggle("hidden", !r);
   if (!r) return;
   $("#presetName").value = r.name;
@@ -570,10 +593,31 @@ function bindPreset() {
 
 /* ---------------------------------------------------------------- assistente */
 
+S.mode = (() => { try { return localStorage.getItem("tb.mode") || "dialog"; } catch { return "dialog"; } })();
+
+function setMode(m) {
+  S.mode = m;
+  try { localStorage.setItem("tb.mode", m); } catch {}
+  $$(".mode-seg button").forEach((b) => b.classList.toggle("active", b.dataset.mode === m));
+  $("#modeHint").textContent = m === "dialog"
+    ? "Parla con il tecnico del suono di tutta la scaletta: fa domande, riassume il piano e crea o modifica solo quando gli dai l'ok."
+    : "Ogni messaggio modifica subito il preset del brano aperto.";
+  $("#chatSend").textContent = m === "dialog" ? "Invia" : "Applica";
+  renderAssist();
+}
+
+function chatLog() {
+  if (S.mode === "dialog") { S.setlist.dialog = S.setlist.dialog || []; return S.setlist.dialog; }
+  const s = song();
+  if (s) s.chat = s.chat || [];
+  return s ? s.chat : [];
+}
+
 function renderAssist() {
   const s = song();
-  $("#chat").innerHTML = (s?.chat || []).map((m) => `<div class="msg ${m.who} ${m.err ? "err" : ""}">${esc(m.text)}</div>`).join("")
-    || `<p class="hint">Quando il preset è pronto puoi chiedere modifiche, come faresti con un tecnico del suono.</p>`;
+  const log = S.setlist ? chatLog() : [];
+  $("#chat").innerHTML = log.map((m) => `<div class="msg ${m.who} ${m.err ? "err" : ""}">${esc(m.text)}</div>`).join("")
+    || `<p class="hint">${S.mode === "dialog" ? "Esempio: \"ho questa scaletta, voglio al massimo quattro patch: una pulita, una crunch anni '90, una distorta, una per i lenti\"." : "Quando il preset è pronto puoi chiedere modifiche, come faresti con un tecnico del suono."}</p>`;
   const chat = $("#chat");
   chat.scrollTop = chat.scrollHeight;
   $("#researchText").textContent = s?.research || "Ancora nessuna ricerca.";
@@ -584,11 +628,81 @@ function renderAssist() {
   $("#warnBox").querySelector("summary").textContent = w.length ? `Avvisi (${w.length})` : "Avvisi";
 }
 
+/* dialogo: risposta dell'AI ed esecuzione dopo l'ok */
+async function dialogTurn(text) {
+  const log = chatLog();
+  log.push({ who: "me", text });
+  renderAssist();
+  saveSoon();
+  let res;
+  try {
+    res = await api("POST", "/api/dialog", { setlist_id: S.setlist.id, current: S.songIdx >= 0 ? S.songIdx : null,
+      history: log.filter((m) => !m.err).map(({ who, text }) => ({ who, text })) });
+  } catch (err) {
+    log.push({ who: "ai", text: err.message, err: true });
+    renderAssist();
+    return "";
+  }
+  log.push({ who: "ai", text: res.reply });
+  renderAssist();
+  saveSoon();
+  if (res.action) await executeAction(res.action);
+  return res.reply;
+}
+
+async function executeAction(action) {
+  const log = chatLog();
+  let res;
+  try {
+    await saveNow();
+    res = await busy("Lo faccio…", () => api("POST", "/api/dialog/execute", { setlist_id: S.setlist.id, action }));
+  } catch (err) {
+    log.push({ who: "ai", text: err.message, err: true });
+    renderAssist();
+    return;
+  }
+  if (res.job) {
+    await pollJob(res.job, { youtube: "Ascolto i brani", "design-all": "Creo i preset", generic: "Creo le patch generiche" }[res.job]);
+    log.push({ who: "ai", text: "Fatto. Trovi tutto nella scaletta: dimmi cosa vuoi ritoccare." });
+  } else {
+    await openSetlist(S.setlist.id, res.song_index);
+    switchTab("preset");
+    log.push({ who: "ai", text: res.reply || "Fatto: il preset è aggiornato." });
+  }
+  renderAssist();
+  saveSoon();
+}
+
+/* lavori lunghi: avanzamento a schermo */
+async function pollJob(kind, label) {
+  const url = kind === "design-all" ? `/api/setlists/${S.setlist.id}/design-all` : `/api/jobs/${S.setlist.id}/${kind}`;
+  $("#busy").classList.remove("hidden");
+  $("#busyText").textContent = `${label}…`;
+  let j;
+  for (;;) {
+    try { j = await api("GET", url); } catch (e) { j = { running: false, errors: [e.message] }; }
+    if (!j.running) break;
+    $("#busyText").textContent = `${label}: ${j.done} di ${j.total}${j.current ? " — " + j.current : ""}`;
+    await new Promise((r) => setTimeout(r, 2000));
+  }
+  $("#busy").classList.add("hidden");
+  await openSetlist(S.setlist.id, S.songIdx);
+  if (j.errors?.length) toast(`Completato con ${j.errors.length} problemi: ${j.errors[0]}`, true);
+  else toast(`${label}: fatto`);
+  return j;
+}
+
 async function sendChat(e) {
   e.preventDefault();
   const s = song();
   const text = $("#chatInput").value.trim();
   if (!text) return;
+  if (S.mode === "dialog") {
+    $("#chatInput").value = "";
+    const reply = await dialogTurn(text);
+    if (reply && $("#speakReplies").checked) speak(reply);
+    return;
+  }
   if (!s?.recipe) { toast("Crea o importa prima un preset", true); return; }
   s.chat.push({ who: "me", text });
   $("#chatInput").value = "";
@@ -629,40 +743,244 @@ function duplicateSong() {
 /* ---------------------------------------------------------------- voce */
 
 const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition;
+const MIC_SVG = '<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M12 14a3 3 0 0 0 3-3V5a3 3 0 1 0-6 0v6a3 3 0 0 0 3 3Zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11Z"/></svg>';
+
+/* Registrazione con il microfono (funziona su tutti i browser, Firefox compreso).
+   stopOnSilence: si ferma da sola dopo una pausa, per la conversazione a voce. */
+async function recordAudio({ stopOnSilence = false, maxMs = 60000, onStart, controller } = {}) {
+  const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  const mime = ["audio/ogg;codecs=opus", "audio/webm;codecs=opus", "audio/webm"].find((m) => window.MediaRecorder?.isTypeSupported?.(m)) || "";
+  const rec = new MediaRecorder(stream, mime ? { mimeType: mime } : undefined);
+  const chunks = [];
+  rec.ondataavailable = (e) => e.data.size && chunks.push(e.data);
+  const done = new Promise((resolve) => { rec.onstop = resolve; });
+  let ctx, timer;
+  const stop = () => { if (rec.state !== "inactive") rec.stop(); };
+  if (controller) controller.stop = stop;
+  if (stopOnSilence) {
+    ctx = new AudioContext();
+    const an = ctx.createAnalyser();
+    an.fftSize = 1024;
+    ctx.createMediaStreamSource(stream).connect(an);
+    const buf = new Float32Array(an.fftSize);
+    let spoke = false, lastLoud = performance.now();
+    const t0 = performance.now();
+    timer = setInterval(() => {
+      an.getFloatTimeDomainData(buf);
+      const rms = Math.sqrt(buf.reduce((a, v) => a + v * v, 0) / buf.length);
+      const now = performance.now();
+      if (rms > 0.02) { spoke = true; lastLoud = now; }
+      if ((spoke && now - lastLoud > 1500) || (!spoke && now - t0 > 8000)) stop();
+    }, 100);
+  }
+  rec.start();
+  onStart?.();
+  const hard = setTimeout(stop, maxMs);
+  await done;
+  clearTimeout(hard);
+  clearInterval(timer);
+  ctx?.close();
+  stream.getTracks().forEach((t) => t.stop());
+  return new Blob(chunks, { type: rec.mimeType || "audio/webm" });
+}
+
+async function transcribe(blob) {
+  if (blob.size < 2000) return "";
+  const fd = new FormData();
+  fd.append("file", blob, blob.type.includes("ogg") ? "voce.ogg" : "voce.webm");
+  const res = await api("POST", "/api/voice/transcribe", fd);
+  return res.text || "";
+}
+
+/* Un'unica frase: Web Speech su Chrome/Edge, altrimenti registrazione + Gemini */
+function listenOnce(controller) {
+  if (SpeechRec) {
+    return new Promise((resolve, reject) => {
+      const rec = new SpeechRec();
+      rec.lang = "it-IT";
+      rec.interimResults = false;
+      rec.continuous = false;
+      let text = "";
+      controller.stop = () => rec.abort();
+      rec.onresult = (ev) => { text = [...ev.results].map((r) => r[0].transcript).join(" "); };
+      rec.onerror = (ev) => (ev.error === "no-speech" || ev.error === "aborted" ? resolve("") : reject(new Error(ev.error === "not-allowed" ? "Consenti l'uso del microfono al browser" : ev.error)));
+      rec.onend = () => resolve(text);
+      rec.start();
+    });
+  }
+  return recordAudio({ stopOnSilence: true, controller }).then(transcribe);
+}
+
+let voices = [];
+function loadVoices() { voices = window.speechSynthesis?.getVoices() || []; }
+loadVoices();
+if (window.speechSynthesis) speechSynthesis.onvoiceschanged = loadVoices;
+
+function speak(text) {
+  return new Promise((resolve) => {
+    if (!window.speechSynthesis || !text) { resolve(); return; }
+    speechSynthesis.cancel();
+    const u = new SpeechSynthesisUtterance(text);
+    u.lang = "it-IT";
+    u.voice = voices.find((v) => v.lang?.startsWith("it") && /natural|online|google/i.test(v.name)) || voices.find((v) => v.lang?.startsWith("it")) || null;
+    u.rate = 1.05;
+    u.onend = resolve;
+    u.onerror = resolve;
+    speechSynthesis.speak(u);
+  });
+}
+
+/* Conversazione a voce: ascolta, risponde a voce, riascolta. Si ferma con il pulsante. */
+const talk = { on: false, ctl: {} };
+function setTalkState(st) {
+  const b = $("#talkBtn");
+  b.classList.remove("listening", "thinking", "speaking");
+  if (st) b.classList.add(st);
+  b.textContent = { listening: "Ti ascolto…", thinking: "Ci penso…", speaking: "Parlo…" }[st] || "Parla";
+}
+
+async function talkLoop() {
+  if (talk.on) {
+    talk.on = false;
+    talk.ctl.stop?.();
+    window.speechSynthesis?.cancel();
+    setTalkState(null);
+    return;
+  }
+  if (S.mode !== "dialog") setMode("dialog");
+  talk.on = true;
+  let empty = 0;
+  while (talk.on) {
+    setTalkState("listening");
+    let text = "";
+    try { text = (await listenOnce(talk.ctl)).trim(); }
+    catch (e) { toast(e.message, true); break; }
+    if (!talk.on) break;
+    if (!text) { if (++empty >= 2) break; continue; }
+    empty = 0;
+    setTalkState("thinking");
+    const reply = await dialogTurn(text);
+    if (!talk.on) break;
+    setTalkState("speaking");
+    await speak(reply);
+  }
+  talk.on = false;
+  setTalkState(null);
+}
+
+/* Dettatura nei campi di testo */
 function attachMic(field) {
-  if (!SpeechRec || !field) return;
+  if (!field || !(SpeechRec || navigator.mediaDevices?.getUserMedia)) return;
   const btn = document.createElement("button");
   btn.type = "button";
   btn.className = "btn icon mic";
   btn.title = "Detta a voce";
   btn.setAttribute("aria-label", "Detta a voce");
-  btn.innerHTML = '<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M12 14a3 3 0 0 0 3-3V5a3 3 0 1 0-6 0v6a3 3 0 0 0 3 3Zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11Z"/></svg>';
+  btn.innerHTML = MIC_SVG;
   const wrap = document.createElement("div");
   wrap.className = "with-mic";
   field.parentNode.insertBefore(wrap, field);
   wrap.append(field, btn);
-  let rec = null;
-  btn.addEventListener("click", () => {
-    if (rec) { rec.stop(); return; }
-    rec = new SpeechRec();
-    rec.lang = "it-IT";
-    rec.interimResults = true;
-    rec.continuous = true;
-    const base = field.value ? field.value.replace(/\s*$/, " ") : "";
-    let finalText = "";
-    rec.onresult = (ev) => {
-      let interim = "";
-      for (let i = ev.resultIndex; i < ev.results.length; i++) {
-        const t = ev.results[i][0].transcript;
-        if (ev.results[i].isFinal) finalText += t; else interim += t;
-      }
-      field.value = base + finalText + interim;
-    };
-    rec.onerror = (ev) => toast(ev.error === "not-allowed" ? "Consenti l'uso del microfono al browser" : `Dettatura: ${ev.error}`, true);
-    rec.onend = () => { rec = null; btn.classList.remove("rec"); field.dispatchEvent(new Event("change")); };
+  const ctl = {};
+  let active = false;
+  btn.addEventListener("click", async () => {
+    if (active) { ctl.stop?.(); return; }
+    active = true;
     btn.classList.add("rec");
-    rec.start();
+    const base = field.value ? field.value.replace(/\s*$/, " ") : "";
+    try {
+      if (SpeechRec) {
+        await new Promise((resolve) => {
+          const rec = new SpeechRec();
+          rec.lang = "it-IT"; rec.interimResults = true; rec.continuous = true;
+          let finalText = "";
+          ctl.stop = () => rec.stop();
+          rec.onresult = (ev) => {
+            let interim = "";
+            for (let i = ev.resultIndex; i < ev.results.length; i++) {
+              const t = ev.results[i][0].transcript;
+              if (ev.results[i].isFinal) finalText += t; else interim += t;
+            }
+            field.value = base + finalText + interim;
+          };
+          rec.onerror = (ev) => { if (ev.error === "not-allowed") toast("Consenti l'uso del microfono al browser", true); };
+          rec.onend = resolve;
+          rec.start();
+        });
+      } else {
+        toast("Parla, poi premi di nuovo il microfono per fermare");
+        const blob = await recordAudio({ controller: ctl, maxMs: 120000 });
+        btn.classList.remove("rec");
+        const text = await busy("Trascrivo…", () => transcribe(blob));
+        field.value = base + text;
+      }
+    } catch (e) { toast(e.message, true); }
+    active = false;
+    btn.classList.remove("rec");
+    field.dispatchEvent(new Event("change"));
   });
+}
+
+/* ---------------------------------------------------------------- YouTube e patch generiche */
+
+async function ytAll() {
+  const n = S.setlist.songs.filter((x) => x.kind !== "patch" && x.title && !x.audio?.analysis).length;
+  if (!n) { toast("Tutti i brani sono già stati ascoltati"); return; }
+  if (!confirm(`Cerco su YouTube e ascolto ${n} brani (circa 1-3 minuti a brano). L'audio è scaricato per uso personale. Procedo?`)) return;
+  try {
+    await saveNow();
+    await api("POST", `/api/setlists/${S.setlist.id}/youtube`);
+    await pollJob("youtube", "Ascolto i brani da YouTube");
+  } catch (e) { toast(e.message, true); }
+}
+
+S.reduceProposal = null;
+function openReduce() {
+  S.reduceProposal = null;
+  $("#reduceResult").innerHTML = "";
+  $("#reduceCreate").classList.add("hidden");
+  $("#reduceDlg").showModal();
+}
+
+function renderProposal() {
+  const p = S.reduceProposal;
+  const songs = S.setlist.songs;
+  $("#reduceResult").innerHTML = (p.notes ? `<p class="hint">${esc(p.notes)}</p>` : "") + p.patches.map((g) => `
+    <div class="group-card"><h3>${esc(g.name)}</h3><div class="hint">${esc(g.description)}</div>
+      <div class="hint">Snapshot: ${esc(g.snapshots)}${g.guitar ? ` · Chitarra: ${esc(g.guitar)}` : ""}</div>
+      <ul>${g.songs.map((r) => `<li>${esc(songs[r.index]?.title || "?")}${r.usage ? ` — ${esc(r.usage)}` : ""}</li>`).join("")}</ul></div>`).join("");
+  $("#reduceCreate").classList.remove("hidden");
+}
+
+function bindReduce() {
+  $("#ytAll").addEventListener("click", ytAll);
+  $("#openReduce").addEventListener("click", openReduce);
+  $("#reduceClose").addEventListener("click", () => $("#reduceDlg").close());
+  $("#reducePropose").addEventListener("click", async () => {
+    try {
+      await saveNow();
+      S.reduceProposal = await busy("Raggruppo i brani…", () => api("POST", `/api/setlists/${S.setlist.id}/group-proposal`,
+        { max_patches: +$("#reduceMax").value || 4, notes: $("#reduceNotes").value.trim() }));
+      renderProposal();
+    } catch {}
+  });
+  $("#reduceCreate").addEventListener("click", async () => {
+    if (!S.reduceProposal) return;
+    $("#reduceDlg").close();
+    try {
+      await api("POST", `/api/setlists/${S.setlist.id}/generic-patches`, { proposal: S.reduceProposal });
+      await pollJob("generic", "Creo le patch generiche");
+    } catch (e) { toast(e.message, true); }
+  });
+  $("#patchInfo").addEventListener("click", (e) => {
+    const id = e.target.dataset.openPatch;
+    if (!id) return;
+    const i = S.setlist.songs.findIndex((x) => x.id === id);
+    if (i >= 0) openSong(i);
+  });
+  $$(".mode-seg button").forEach((b) => b.addEventListener("click", () => setMode(b.dataset.mode)));
+  $("#talkBtn").addEventListener("click", talkLoop);
+  setMode(S.mode);
 }
 
 /* ---------------------------------------------------------------- dispositivi */
@@ -1024,25 +1342,12 @@ async function suggestGuitars() {
 }
 
 async function designAll() {
-  const missing = S.setlist.songs.filter((s) => !s.recipe).length;
-  if (!missing) { toast("Tutti i brani hanno già un preset"); return; }
+  const missing = S.setlist.songs.filter((s) => !s.recipe && !s.uses_patch && s.kind !== "patch").length;
+  if (!missing) { toast("Tutti i brani hanno già un preset o una patch generica"); return; }
   if (!confirm(`Creo i preset per ${missing} brani, uno dopo l'altro (circa 1 minuto a brano). Procedo?`)) return;
+  await saveNow();
   await api("POST", `/api/setlists/${S.setlist.id}/design-all`, {});
-  $("#busyText").textContent = "Avvio…";
-  $("#busy").classList.remove("hidden");
-  const poll = async () => {
-    let j;
-    try { j = await api("GET", `/api/setlists/${S.setlist.id}/design-all`); } catch (e) { j = { running: false, errors: [e.message] }; }
-    if (j.running) {
-      $("#busyText").textContent = `Creo i preset: ${j.done} di ${j.total}${j.current ? " — " + j.current : ""}`;
-      setTimeout(poll, 2000);
-      return;
-    }
-    $("#busy").classList.add("hidden");
-    await openSetlist(S.setlist.id);
-    toast(j.errors?.length ? `Fatto, ${j.errors.length} brani non riusciti: ${j.errors[0]}` : "Preset creati per tutta la scaletta", !!j.errors?.length);
-  };
-  poll();
+  await pollJob("design-all", "Creo i preset");
 }
 
 function bindSetlistTools() {
@@ -1191,6 +1496,7 @@ function bindAll() {
   bindMerge();
   bindGear();
   bindSetlistTools();
+  bindReduce();
 }
 
 (async function init() {

@@ -107,4 +107,15 @@ def download_audio(url: str, dest_dir: str | Path) -> Path:
     opts = _ydl_opts(format="bestaudio/best", outtmpl=str(dest_dir / "%(id)s.%(ext)s"))
     with yt_dlp.YoutubeDL(opts) as ydl:
         d = ydl.extract_info(url, download=True)
+        if d.get("entries"):  # ricerca "ytsearch1:...": il primo risultato
+            d = next(e for e in d["entries"] if e)
         return Path(ydl.prepare_filename(d))
+
+
+def search_and_download(artist: str, title: str, dest_dir: str | Path) -> tuple[Path, TrackInfo]:
+    """Cerca il brano su YouTube e ne scarica l'audio (uso personale, vedi nota sopra)."""
+    q = " ".join(x for x in [artist, title] if x).strip()
+    if not q:
+        raise ValueError("Brano senza titolo")
+    path = download_audio(f"ytsearch1:{q} official audio", dest_dir)
+    return path, TrackInfo(title=title, artist=artist, source=f"YouTube: {q}")

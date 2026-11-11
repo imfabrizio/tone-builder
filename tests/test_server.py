@@ -112,3 +112,67 @@ def test_gear_import_and_setlist_automation(recipe, monkeypatch):
     assert st["done"] == 2 and not st["errors"]
     final = c.get(f"/api/setlists/{sl['id']}").json()
     assert all(s["recipe"] for s in final["songs"])
+
+
+def test_generic_patches_dialog_and_youtube(recipe, monkeypatch, tmp_path):
+    import time
+    from tonebuilder.audio import metadata
+
+    class PlanAI(StubAI):
+        supports_audio = True
+
+        def complete_json(self, system, user, *, audio_path=None):
+            if "PATCH GENERICHE" in system:
+                return {"patches": [{"name": "Crunch 90", "description": "rock", "snapshots": "Pulito, Crunch, Lead",
+                                     "songs": [{"index": 0, "usage": "strofa Crunch"}, {"index": 1, "usage": "assolo Lead"}]}],
+                        "notes": "simili"}
+            if "tecnico del suono di un chitarrista e parli" in system:
+                ok = "CHITARRISTA: ok procedi" in user.splitlines()[-2] if len(user.splitlines()) > 1 else False
+                return {"reply": "Faccio due patch?", "action": {"type": "generic_patches", "max_patches": 2}}
+            return recipe.model_dump()
+
+        def complete_text(self, system, user, *, audio_path=None):
+            return "suono crunch con chorus"
+
+    stub = PlanAI(recipe.model_dump())
+    monkeypatch.setattr(srv, "_provider", lambda name=None: stub)
+    c = TestClient(srv.app)
+    sl = c.post("/api/setlists/import", json={"text": "A - Uno\nB - Due\nC - Tre", "name": "t"}).json()
+    sid = sl["id"]
+
+    # il dialogo non esegue azioni senza un ok esplicito
+    r = c.post("/api/dialog", json={"setlist_id": sid, "history": [{"who": "me", "text": "riduciamo le patch"}]}).json()
+    assert r["action"] is None and r["reply"]
+    r = c.post("/api/dialog", json={"setlist_id": sid, "history": [{"who": "me", "text": "ok procedi"}]}).json()
+    assert r["action"]["type"] == "generic_patches"
+
+    prop = c.post(f"/api/setlists/{sid}/group-proposal", json={"max_patches": 2}).json()
+    assert sorted(x["index"] for x in prop["patches"][0]["songs"]) == [0, 1, 2]  # brano dimenticato riassegnato
+    c.post(f"/api/setlists/{sid}/generic-patches", json={"proposal": prop})
+    for _ in range(50):
+        st = c.get(f"/api/jobs/{sid}/generic").json()
+        if not st["running"]:
+            break
+        time.sleep(0.1)
+    assert not st["errors"], st
+    data = c.get(f"/api/setlists/{sid}").json()
+    assert data["songs"][0]["kind"] == "patch" and data["songs"][0]["recipe"]
+    assert all(s.get("uses_patch") == data["songs"][0]["id"] for s in data["songs"][1:])
+    assert data["songs"][1]["patch_usage"] == "strofa Crunch"
+
+    # YouTube: download simulato
+    wav = tmp_path / "x.wav"
+    wav.write_bytes(b"RIFF0000WAVE")
+    monkeypatch.setattr(metadata, "search_and_download",
+                        lambda a, t, d: (wav, metadata.TrackInfo(title=t, artist=a)))
+    monkeypatch.setattr(srv.analysis, "demucs_available", lambda: False)
+    monkeypatch.setattr(srv, "_has", lambda m: False)
+    c.post(f"/api/setlists/{sid}/youtube")
+    for _ in range(50):
+        st = c.get(f"/api/jobs/{sid}/youtube").json()
+        if not st["running"]:
+            break
+        time.sleep(0.1)
+    assert st["done"] == 3 and not st["errors"], st
+    data = c.get(f"/api/setlists/{sid}").json()
+    assert data["songs"][1]["audio"]["analysis"] == "suono crunch con chorus"

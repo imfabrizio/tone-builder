@@ -84,6 +84,14 @@ Al primo utilizzo Demucs scarica il modello (circa 80 MB). La separazione di un 
 - **Importa scaletta**: da una playlist Spotify oppure incollando un elenco "Artista - Titolo" (va bene anche il CSV di Exportify).
 - **Proponi le chitarre**: per ogni brano l'AI sceglie la tua chitarra più adatta, i pickup per le varie parti e l'accordatura.
 - **Crea tutti i preset**: progetta in sequenza i preset dei brani che non ce l'hanno ancora.
+- **Ascolta i brani da YouTube**: per ogni brano cerca la traccia su YouTube, la scarica (uso personale), isola la chitarra se c'è Demucs e fa descrivere il suono all'AI. Spotify non permette di scaricare o analizzare l'audio, quindi l'ascolto passa da YouTube.
+- **Riduci a patch generiche**: raggruppa i brani con suono simile in poche patch complete (due linee piene, 12-16 blocchi, 6-8 snapshot) e per ogni brano indica quale snapshot usare in strofa, ritornello e assolo.
+
+## Dialogo e voce
+
+Nel pannello a destra, modalità **Dialogo**: parli (o scrivi) con il tecnico del suono di tutta la scaletta. Fa domande, riassume il piano e crea o modifica i preset **solo quando gli dai l'ok** ("ok", "procedi", "vai"). La modalità **Modifica diretta** applica invece subito ogni richiesta al preset aperto.
+
+Il pulsante **Parla** avvia la conversazione a voce: ascolta, risponde ad alta voce e riascolta, finché non lo premi di nuovo. Su Chrome ed Edge usa il riconoscimento vocale del browser; su Firefox e negli altri browser registra con il microfono e fa trascrivere a Gemini (serve la chiave Gemini). Lo stesso vale per i microfoni accanto ai campi di testo.
 
 Per Spotify serve un'app personale gratuita: su [developer.spotify.com/dashboard](https://developer.spotify.com/dashboard) crea un'app (API: Web API) con Redirect URI `http://127.0.0.1:8765/api/spotify/callback` e incolla il Client ID in *Impostazioni > Spotify*. Le regole di Spotify (febbraio 2026) permettono di leggere solo le playlist create da te o di cui sei collaboratore, e il proprietario dell'app deve avere Premium. Se non vuoi creare l'app, incolla l'elenco dei brani.
 
