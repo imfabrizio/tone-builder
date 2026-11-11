@@ -389,3 +389,17 @@ code { background: var(--tolex); padding: 1px 5px; border-radius: 3px; font-size
 .changebar .cb-row span { flex: 1 1 240px; }
 .pedal.changed { outline: 2px solid var(--lamp); outline-offset: 2px; box-shadow: 0 0 14px rgba(242,169,59,.45); }
 #matrix td.chg { box-shadow: inset 0 0 0 2px var(--lamp); }
+
+/* cosa usa il preset / riepilogo scaletta */
+.uses { margin: 14px 0 6px; }
+.uses summary { cursor: pointer; font-weight: 600; }
+.table-wrap { overflow-x: auto; margin-top: 8px; }
+.uses-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.uses-table th, .uses-table td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+.uses-table th { color: var(--ink-2); font-weight: 600; }
+.uses-table td small { color: var(--ink-2); display: block; }
+.uses-table tr.chg td { background: rgba(242,169,59,.12); }
+.uses-table .muted { color: var(--ink-2); }
+.uses-table .link { background: none; border: 0; color: var(--ink); text-align: left; padding: 0; font: inherit; cursor: pointer; text-decoration: underline; text-decoration-color: var(--line); }
+.uses-table .link:hover { text-decoration-color: var(--lamp); }
+#wholeDlg h3 { margin: 18px 0 8px; font-size: 15px; }

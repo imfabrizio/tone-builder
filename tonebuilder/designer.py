@@ -13,6 +13,7 @@ passano da `edit()`.
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -37,6 +38,7 @@ class DesignRequest(BaseModel):
     gear: str = ""  # strumentazione disponibile (chitarre, pickup, accordature)
     references: list[dict[str, Any]] = []  # ricette importate da usare come base
     use_iridium: bool = False  # ampli e cab della linea 1 dallo Strymon Iridium (solo Helix)
+    irs: list[str] = []  # nomi dei file IR dell'utente (dalle cartelle IR delle impostazioni)
 
 
 @dataclass
@@ -190,6 +192,42 @@ def research_prompt(req: DesignRequest) -> str:
     )
 
 
+def ir_block(irs: list[str]) -> str:
+    if not irs:
+        return ""
+    shown = irs[:200]
+    return ("IR DELL'UTENTE DISPONIBILI (file .wav nelle sue cartelle). Usa gli IR quando il chitarrista li chiede o quando "
+            "un IR adatto migliora il suono: metti nel campo \"ir\" di un blocco role \"ir\" (o \"cab\") ESATTAMENTE uno di "
+            "questi nomi, scegliendo quello piu' adatto al cono/cassa dell'ampli (es. 4x12 Greenback per Marshall, 2x12 Blue "
+            "per Vox). Se usi un blocco \"ir\" togli il cab che sostituisce, uno per ogni ampli:\n"
+            + "\n".join(f"- {n}" for n in shown) + (f"\n(e altri {len(irs) - len(shown)})" if len(irs) > len(shown) else ""))
+
+
+def match_irs(recipe: ToneRecipe, irs: list[str]) -> list[str]:
+    """Riporta i nomi IR scelti dall'AI a file esistenti; avvisa per quelli che non trova."""
+    warnings = []
+    if not irs:
+        return warnings
+    lower = {n.lower(): n for n in irs}
+    stems = {n.rsplit(".", 1)[0].lower(): n for n in irs}
+    for b in recipe.chain:
+        if not b.ir:
+            continue
+        key = b.ir.strip().split("/")[-1].split("\\")[-1].lower()
+        hit = lower.get(key) or stems.get(key.rsplit(".", 1)[0])
+        if not hit:
+            words = set(re.findall(r"[a-z0-9]+", key))
+            best = max(irs, key=lambda n: len(words & set(re.findall(r"[a-z0-9]+", n.lower()))))
+            if len(words & set(re.findall(r"[a-z0-9]+", best.lower()))) >= 2:
+                hit = best
+        if hit:
+            b.ir = hit
+        else:
+            warnings.append(f"IR \"{b.ir}\" non trovato nelle tue cartelle IR: il blocco {b.label or b.id} resta senza IR")
+            b.ir = None
+    return warnings
+
+
 def _user_prompt(req: DesignRequest, research: str) -> str:
     parts = [
         f"CANZONE: {req.title or '-'} | ARTISTA: {req.artist or '-'}",
@@ -209,6 +247,8 @@ def _user_prompt(req: DesignRequest, research: str) -> str:
         parts.append(f"ANALISI DELLA TRACCIA AUDIO:\n{req.audio_analysis}")
     if research:
         parts.append(f"RISULTATI DELLA RICERCA WEB:\n{research}")
+    if req.irs:
+        parts.append(ir_block(req.irs))
     if req.references:
         parts.append("PRESET DI RIFERIMENTO IMPORTATI (usali come base):\n"
                      + json.dumps(req.references, ensure_ascii=False)[:20000])
@@ -287,6 +327,7 @@ def design(req: DesignRequest, provider: LLMProvider, *, web_research: bool = Tr
     data = provider.complete_json(system, user, audio_path=use_audio)
     recipe = _validate(data, provider, system, user)
     warnings += apply_gear_rules(recipe, req.use_iridium)
+    warnings += match_irs(recipe, req.irs)
     warnings += check_models(recipe)
     return DesignResult(recipe, research_text, sources, warnings)
 
@@ -305,7 +346,8 @@ Non aggiungere altre note, e togli dalle notes le righe che rimandano l'utente a
 _RESEARCH_WORDS = ("cerca", "ricerca", "trova", "preset", " ir", "impulse", "customtone", "cortex cloud", "online", "web")
 
 
-def edit(recipe: ToneRecipe, instruction: str, provider: LLMProvider, *, web_research: bool = True) -> DesignResult:
+def edit(recipe: ToneRecipe, instruction: str, provider: LLMProvider, *, web_research: bool = True,
+         irs: list[str] | None = None) -> DesignResult:
     system = system_prompt() + "\n" + EDIT_RULES
     research_text, sources = "", []
     low = f" {instruction.lower()}"
@@ -319,20 +361,29 @@ def edit(recipe: ToneRecipe, instruction: str, provider: LLMProvider, *, web_res
             pass
     if recipe.iridium and recipe.iridium.enabled:
         system += IRIDIUM_RULES
+    irs = irs or []
+    wants_ir = bool(re.search(r"\bir\b|impulse|risposta all'impulso", instruction, re.I))
     user = ("RICETTA ATTUALE:\n" + recipe.model_dump_json(indent=1)
             + "\n\nMODIFICA RICHIESTA: " + instruction
+            + (f"\n\n{ir_block(irs)}" if irs else "")
             + (f"\n\nRISULTATI DELLA RICERCA WEB:\n{research_text}" if research_text else "")
             + "\n\nRestituisci la ricetta JSON completa.")
     data = provider.complete_json(system, user)
     new = _validate(data, provider, system, user)
     apply_gear_rules(new, recipe.iridium.enabled if recipe.iridium else None)
+    ir_warn = match_irs(new, irs)
     added = [n for n in new.notes if n not in recipe.notes]
     changes = [n for n in added if n.lower().startswith("modifica:")]
     # le righe "Modifica:" sono la risposta in chat, non note permanenti del preset
     new.notes = [n for n in new.notes if n not in changes]
-    res = DesignResult(new, research=research_text, sources=sources, warnings=check_models(new))
+    res = DesignResult(new, research=research_text, sources=sources, warnings=ir_warn + check_models(new))
     res.reply = " ".join(c.split(":", 1)[1].strip() for c in changes) or (added[-1] if added else "Modifica applicata.")
     res.changes = diff_recipes(recipe, new)
+    if wants_ir and not irs:
+        res.reply += (" Attenzione: non ho trovato tuoi file IR. Indica la cartella degli IR in Impostazioni "
+                      "(Cartelle IR) e poi chiedimelo di nuovo.")
+    elif ir_warn:
+        res.reply += " " + " ".join(ir_warn)
     if not res.changes["items"]:
         res.reply = "Non ho cambiato niente nel preset: prova a dirmi quale blocco o snapshot toccare e di quanto."
     return res

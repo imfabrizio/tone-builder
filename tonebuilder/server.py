@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
-from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -403,6 +403,18 @@ def api_suggest_guitars(sid: str) -> dict:
 _jobs: dict[str, dict[str, Any]] = {}
 
 
+def _ir_files() -> dict[str, str]:
+    """IR dell'utente: nome file -> percorso (dalle cartelle IR delle impostazioni)."""
+    out: dict[str, str] = {}
+    for r in sources.scan(load_settings().ir_folders or [], "ir"):
+        out.setdefault(Path(r.path).name, r.path)
+    return out
+
+
+def _ir_names() -> list[str]:
+    return sorted(_ir_files())
+
+
 @app.post("/api/setlists/{sid}/design-all")
 def design_all(sid: str, body: dict | None = None) -> dict:
     """Crea in background i preset di tutti i brani che non ce l'hanno."""
@@ -410,7 +422,8 @@ def design_all(sid: str, body: dict | None = None) -> dict:
     if job and job.get("running"):
         return job
     data = get_setlist(sid)
-    todo = [i for i, s in enumerate(data["songs"]) if not s.get("recipe") and not s.get("uses_patch")
+    redo = bool((body or {}).get("redo"))
+    todo = [i for i, s in enumerate(data["songs"]) if (redo or not s.get("recipe")) and not s.get("uses_patch")
             and s.get("kind") != "patch"]
     default_desc = (body or {}).get("description") or ""
     job = {"running": True, "done": 0, "total": len(todo), "current": "", "errors": [], "result": None}
@@ -418,12 +431,13 @@ def design_all(sid: str, body: dict | None = None) -> dict:
     prov = _provider()
     settings = load_settings()
     gear_text = gearmod.describe_for_ai(gearmod.load_gear())
+    ir_names = _ir_names()
 
     def work() -> None:
         try:
             for n, i in enumerate(todo, 1):
                 cur = json.loads(_setlist_path(sid).read_text(encoding="utf-8"))
-                if i >= len(cur["songs"]) or cur["songs"][i].get("recipe"):
+                if i >= len(cur["songs"]) or (cur["songs"][i].get("recipe") and not redo):
                     continue
                 song = cur["songs"][i]
                 job["current"] = f"{song.get('artist', '')} - {song.get('title', '')}"
@@ -433,12 +447,15 @@ def design_all(sid: str, body: dict | None = None) -> dict:
                     description=rq.get("description") or default_desc or "il suono di chitarra originale del brano, pronto per il live",
                     guitar=rq.get("guitar", ""), snapshots=rq.get("snapshots", ""),
                     gear_preferences=rq.get("gear_preferences", ""), gear=gear_text,
+                    audio_analysis=(song.get("audio") or {}).get("analysis", ""), irs=ir_names,
                 )
                 try:
                     res = design(req, prov, web_research=settings.web_research)
                     cur = json.loads(_setlist_path(sid).read_text(encoding="utf-8"))
                     tgt = next((x for x in cur["songs"] if x.get("id") == song.get("id")), None)
                     if tgt is not None:
+                        if tgt.get("recipe"):
+                            tgt["prev_recipe"] = tgt["recipe"]
                         tgt.update({"recipe": res.recipe.model_dump(), "research": res.research, "sources": res.sources,
                                     "warnings": res.warnings, "links": sources.search_links(req.artist, req.title)})
                         tgt.setdefault("chat", []).append({"who": "ai", "text": f"Preset creato in automatico: {len(res.recipe.chain)} blocchi, {len(res.recipe.snapshots)} snapshot."})
@@ -482,7 +499,7 @@ def _start_job(key: str, total: int, work) -> dict[str, Any]:
 
 
 JOB_LABELS = {"youtube": "Ascolto dei brani da YouTube", "design-all": "Creazione dei preset",
-              "generic": "Creazione delle patch generiche"}
+              "generic": "Creazione delle patch generiche", "edit-many": "Modifica di tutti i preset"}
 
 
 def jobs_summary(sid: str) -> list[dict]:
@@ -615,8 +632,11 @@ def start_generic(sid: str, proposal: dict) -> dict:
     prov = _provider()
     gear_text = gearmod.describe_for_ai(gearmod.load_gear())
     snapshot_songs = get_setlist(sid)["songs"]
+    ir_names = _ir_names()
     groups = [{**g, "song_ids": [snapshot_songs[r["index"]]["id"] for r in g["songs"] if 0 <= r["index"] < len(snapshot_songs)]}
               for g in groups]
+
+    old_ids = {x.get("id") for x in snapshot_songs if x.get("kind") == "patch"}
 
     def work(job):
         made = []
@@ -624,8 +644,17 @@ def start_generic(sid: str, proposal: dict) -> dict:
             job["current"] = g["name"]
             try:
                 req = planner.generic_request(g, snapshot_songs, gear_text, bool(proposal.get("use_iridium")))
+                req.irs = ir_names
                 res = design(req, prov, web_research=False)
                 cur = _load_sl(sid)
+                if old_ids:
+                    # le nuove patch sostituiscono quelle vecchie, non si aggiungono
+                    cur["songs"] = [x for x in cur["songs"] if x.get("id") not in old_ids]
+                    for x in cur["songs"]:
+                        if x.get("uses_patch") in old_ids:
+                            for k in ("uses_patch", "uses_patch_name", "patch_usage"):
+                                x.pop(k, None)
+                    old_ids.clear()
                 pid = uuid.uuid4().hex[:8]
                 by_id = {x.get("id"): x for x in cur["songs"]}
                 covered = []
@@ -652,6 +681,118 @@ def start_generic(sid: str, proposal: dict) -> dict:
         return {"patches": made}
 
     return _start_job(f"{sid}:generic", len(groups), work)
+
+
+def _targets(songs: list[dict], target: Any) -> list[int]:
+    if isinstance(target, list):
+        return [i for i in target if isinstance(i, int) and 0 <= i < len(songs) and songs[i].get("recipe")]
+    if target == "patches":
+        return [i for i, x in enumerate(songs) if x.get("kind") == "patch" and x.get("recipe")]
+    if target == "songs":
+        return [i for i, x in enumerate(songs) if x.get("kind") != "patch" and x.get("recipe")]
+    return [i for i, x in enumerate(songs) if x.get("recipe")]
+
+
+def start_edit_many(sid: str, instruction: str, target: Any = "all") -> dict:
+    instruction = (instruction or "").strip()
+    if not instruction:
+        _err(ValueError("Scrivi la modifica da applicare"))
+    songs = get_setlist(sid)["songs"]
+    ids = [songs[i]["id"] for i in _targets(songs, target)]
+    if not ids:
+        _err(ValueError("Nessun preset da modificare: crea prima i preset"))
+    prov, settings, ir_names = _provider(), load_settings(), _ir_names()
+
+    def work(job):
+        for n, song_id in enumerate(ids, 1):
+            cur = _load_sl(sid)
+            song = next((x for x in cur["songs"] if x.get("id") == song_id), None)
+            if not song or not song.get("recipe"):
+                job["done"] = n
+                continue
+            job["current"] = song.get("title") or song_id
+            try:
+                res = edit(ToneRecipe.model_validate(song["recipe"]), instruction, prov,
+                           web_research=False, irs=ir_names)
+                cur = _load_sl(sid)
+                song = next((x for x in cur["songs"] if x.get("id") == song_id), None)
+                if song is not None:
+                    song["prev_recipe"] = song["recipe"]
+                    song.update({"recipe": res.recipe.model_dump(), "warnings": res.warnings,
+                                 "last_changes": res.changes})
+                    song.setdefault("chat", []).append({"who": "ai", "text": f"Modifica su tutta la scaletta: {res.reply}",
+                                                        "changes": res.changes})
+                    _save_sl(cur)
+            except Exception as e:
+                job["errors"].append(f"{job['current']}: {e}")
+                print(f"[errore] {job['current']}: {e}", flush=True)
+            job["done"] = n
+        return {}
+
+    return _start_job(f"{sid}:edit-many", len(ids), work)
+
+
+@app.post("/api/setlists/{sid}/edit-many")
+def api_edit_many(sid: str, body: dict) -> dict:
+    return start_edit_many(sid, str(body.get("instruction") or ""), body.get("target") or "all")
+
+
+@app.get("/api/irs")
+def list_irs() -> dict:
+    names = _ir_names()
+    return {"count": len(names), "names": names[:500], "folders": load_settings().ir_folders or []}
+
+
+@app.get("/api/setlists/{sid}/overview")
+def setlist_overview(sid: str) -> list[dict]:
+    """Riepilogo di tutti i preset: ampli, cab/IR ed effetti, per controllare cosa usa ognuno."""
+    out = []
+    for i, x in enumerate(get_setlist(sid)["songs"]):
+        r = x.get("recipe")
+        row = {"index": i, "title": x.get("title", ""), "artist": x.get("artist", ""), "kind": x.get("kind", "song"),
+               "uses_patch_name": x.get("uses_patch_name", ""), "has_recipe": bool(r), "blocks": []}
+        if r:
+            row["name"] = r.get("name", "")
+            row["snapshots"] = [s.get("name", "") for s in r.get("snapshots", [])]
+            for b in r.get("chain", []):
+                row["blocks"].append({"role": b.get("role"), "name": b.get("gear_ref") or b.get("label") or b.get("id"),
+                                      "ir": b.get("ir") or "", "line": b.get("line", 1),
+                                      "helix": (b.get("helix") or {}).get("model") or "",
+                                      "qc": (b.get("qc") or {}).get("model") or ""})
+        out.append(row)
+    return out
+
+
+@app.post("/api/setlists/{sid}/helix-zip")
+def setlist_helix_zip(sid: str):
+    """Genera i file .hsp di tutti i preset della scaletta e li restituisce in un unico zip."""
+    import io
+    import zipfile
+    data = get_setlist(sid)
+    s = load_settings()
+    irs = _ir_files()
+    buf, done, problems = io.BytesIO(), 0, []
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+        n = 0
+        for x in data["songs"]:
+            if not x.get("recipe"):
+                continue
+            n += 1
+            try:
+                path, b = hx.generate_hsp(ToneRecipe.model_validate(x["recipe"]), s.helix_output_dir, irs)
+                z.write(path, f"{n:02d} {path.name}")
+                done += 1
+                problems += [f"{x.get('title')}: {w}" for w in b.warnings]
+            except Exception as e:
+                problems.append(f"{x.get('title')}: {e}")
+        if problems:
+            z.writestr("LEGGIMI-avvisi.txt", "\n".join(problems))
+    if not done:
+        _err(ValueError("Nessun file creato. " + (problems[0] if problems else "Nessun preset nella scaletta")))
+    name = re.sub(r"[^\w\- ]+", "", data.get("name", "scaletta")).strip() or "scaletta"
+    return Response(buf.getvalue(), media_type="application/zip",
+                    headers={"Content-Disposition": f'attachment; filename="{name} - Helix.zip"',
+                             "X-Created": str(done), "X-Problems": str(len(problems))})
 
 
 @app.post("/api/setlists/{sid}/generic-patches")
@@ -726,7 +867,7 @@ def api_dialog_execute(body: ActionIn) -> dict:
         try:
             if kind == "edit_song" and song.get("recipe"):
                 res = edit(ToneRecipe.model_validate(song["recipe"]), str(a.get("instruction") or ""), _provider(),
-                           web_research=load_settings().web_research)
+                           web_research=load_settings().web_research, irs=_ir_names())
             else:
                 rq = song.get("request") or {}
                 for k in ("description", "snapshots", "guitar", "gear_preferences"):
@@ -737,7 +878,7 @@ def api_dialog_execute(body: ActionIn) -> dict:
                                     description=rq.get("description") or str(a.get("instruction") or ""),
                                     guitar=rq.get("guitar", ""), snapshots=rq.get("snapshots", ""),
                                     gear_preferences=rq.get("gear_preferences", ""), gear=gear_text,
-                                    audio_analysis=(song.get("audio") or {}).get("analysis", ""))
+                                    audio_analysis=(song.get("audio") or {}).get("analysis", ""), irs=_ir_names())
                 res = design(req, _provider(), web_research=load_settings().web_research)
                 song.update({"research": res.research, "sources": res.sources,
                              "links": sources.search_links(req.artist, req.title)})
@@ -753,7 +894,10 @@ def api_dialog_execute(body: ActionIn) -> dict:
     if kind == "analyze_youtube":
         return {"job": "youtube", **start_youtube(sid)}
     if kind == "design_all":
-        return {"job": "design-all", **design_all(sid, {"description": a.get("description", "")})}
+        return {"job": "design-all", **design_all(sid, {"description": a.get("description", ""),
+                                                        "redo": bool(a.get("redo"))})}
+    if kind == "edit_many":
+        return {"job": "edit-many", **start_edit_many(sid, str(a.get("instruction") or ""), a.get("target") or "all")}
     if kind == "generic_patches":
         try:
             prop = planner.propose_groups(data["songs"], max(1, min(8, int(a.get("max_patches") or 4))),
@@ -843,6 +987,7 @@ def api_design(body: DesignIn) -> dict:
             audio_path = t.read_text(encoding="utf-8")
     try:
         req = DesignRequest(**body.model_dump(exclude={"audio_id"}))
+        req.irs = _ir_names()
         if not req.gear:
             req.gear = gearmod.describe_for_ai(gearmod.load_gear())
         res = design(req, _provider(),
@@ -863,7 +1008,8 @@ class EditIn(BaseModel):
 @app.post("/api/edit")
 def api_edit(body: EditIn) -> dict:
     try:
-        res = edit(body.recipe, body.instruction, _provider(), web_research=load_settings().web_research)
+        res = edit(body.recipe, body.instruction, _provider(), web_research=load_settings().web_research,
+                   irs=_ir_names())
     except AIError as e:
         _err(e)
     out = res.to_dict()
@@ -931,7 +1077,7 @@ def helix_preview(body: RecipeIn) -> dict:
 def helix_generate(body: RecipeIn) -> dict:
     s = load_settings()
     try:
-        path, b = hx.generate_hsp(body.recipe, s.helix_output_dir)
+        path, b = hx.generate_hsp(body.recipe, s.helix_output_dir, _ir_files())
     except Exception as e:
         _err(e)
     return {"file": path.name, "path": str(path), "download": f"/api/files/helix/{path.name}", "warnings": b.warnings}

@@ -178,8 +178,16 @@ Azioni possibili (campo "action"):
 - {"type": "edit_song", "song_index": N, "instruction": "..."} modifica il preset esistente di un brano;
 - {"type": "generic_patches", "max_patches": N, "notes": "indicazioni del chitarrista"} riduce la scaletta a patch generiche
   corpose e le crea;
+- {"type": "edit_many", "target": "patches" | "songs" | "all" | [indici], "instruction": "..."} applica la stessa
+  modifica a piu' preset ESISTENTI (es. "usa gli IR in tutte le patch", "meno riverbero ovunque"): li modifica, non li
+  ricrea;
 - {"type": "analyze_youtube"} cerca su YouTube e analizza i brani della scaletta non ancora analizzati;
-- {"type": "design_all", "description": "indicazioni comuni"} crea i preset di tutti i brani che non ce l'hanno.
+- {"type": "design_all", "description": "indicazioni comuni", "redo": false} crea i preset dei brani che non ce l'hanno,
+  usando la descrizione e l'analisi di ciascun brano ("redo": true solo se chiede di rifarli tutti da zero).
+
+MODIFICARE NON E' RICREARE: se il chitarrista chiede di cambiare qualcosa in preset o patch che esistono gia', usa SEMPRE
+"edit_song" (uno) o "edit_many" (piu' di uno). "design_song", "design_all" con redo e "generic_patches" sostituiscono
+quello che c'e' e vanno usati solo se chiede esplicitamente di rifare da zero o di creare nuove patch.
 
 Rispondi SOLO in JSON: {"reply": "testo da dire all'utente", "action": null oppure un oggetto azione}.
 Quando restituisci un'azione, "reply" conferma in una frase cosa stai per fare.
@@ -220,7 +228,26 @@ ACTION_LABELS = {
     "generic_patches": "creare le patch generiche",
     "analyze_youtube": "ascoltare i brani da YouTube",
     "design_all": "creare i preset di tutti i brani",
+    "edit_many": "modificare tutti i preset",
 }
+
+_REDO = re.compile(r"\b(rifa\w*|ricre\w*|da zero|da capo|nuov[oaie]|crea\w*|genera\w*)\b", re.I)
+
+
+def _guard_action(action: dict, setlist: dict | None, last: str) -> tuple[dict, str]:
+    """Evita che una richiesta di modifica diventi un preset nuovo. Ritorna (azione, nota per l'utente)."""
+    songs = (setlist or {}).get("songs", [])
+    t = action.get("type")
+    if t == "design_song" and not _REDO.search(last):
+        idx = action.get("song_index")
+        if isinstance(idx, int) and 0 <= idx < len(songs) and (songs[idx].get("recipe") or songs[idx].get("uses_patch")):
+            instr = action.get("instruction") or action.get("description") or last
+            return {"type": "edit_song", "song_index": idx, "instruction": instr}, ""
+    if t == "generic_patches" and any(x.get("kind") == "patch" for x in songs) and not _REDO.search(last):
+        return {"type": "edit_many", "target": "patches", "instruction": action.get("notes") or last}, ""
+    if t == "design_all" and action.get("redo") and not _REDO.search(last):
+        return {**action, "redo": False}, ""
+    return action, ""
 
 
 def describe_action(action: dict, setlist: dict | None = None) -> str:
@@ -229,7 +256,17 @@ def describe_action(action: dict, setlist: dict | None = None) -> str:
     if setlist and isinstance(idx, int) and 0 <= idx < len(setlist.get("songs", [])):
         label += f" \"{setlist['songs'][idx].get('title') or 'senza titolo'}\""
     if action.get("type") == "generic_patches" and action.get("max_patches"):
-        label += f" (massimo {action['max_patches']})"
+        label += f" (massimo {action['max_patches']}, sostituiscono quelle attuali)"
+    if action.get("type") == "edit_many":
+        tgt = action.get("target")
+        label = {"patches": "Modificare tutte le patch generiche", "songs": "Modificare i preset di tutti i brani"}.get(
+            tgt, f"Modificare {len(tgt)} preset" if isinstance(tgt, list) else "Modificare tutti i preset")
+        if action.get("instruction"):
+            label += f": {str(action['instruction'])[:80]}"
+    if action.get("type") == "edit_song" and action.get("instruction"):
+        label += f": {str(action['instruction'])[:80]}"
+    if action.get("type") == "design_all" and action.get("redo"):
+        label = "Rifare da zero i preset di tutti i brani"
     return label[0].upper() + label[1:]
 
 
@@ -241,6 +278,8 @@ def converse(history: list[dict], context: str, provider: LLMProvider, setlist: 
     if action and action.get("type") not in ACTION_LABELS:
         action = None
     last = next((m.get("text", "") for m in reversed(history) if m.get("who") == "me"), "")
+    if action:
+        action, _ = _guard_action(action, setlist, " ".join(m.get("text", "") for m in history[-6:] if m.get("who") == "me"))
     pending = None
     if action and not _OK.search(last):
         # niente azioni senza un ok esplicito: l'azione diventa una proposta da confermare con un clic

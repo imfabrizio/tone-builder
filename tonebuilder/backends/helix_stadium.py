@@ -317,8 +317,16 @@ def register_irs(wavs: list[str | Path]) -> str:
     return r.stdout.strip()
 
 
-def generate_hsp(recipe: ToneRecipe, out_dir: str | Path) -> tuple[Path, HelixBuild]:
-    """Genera il file .hsp. Se un IR non e' registrato, riprova senza e lo segnala."""
+def generate_hsp(recipe: ToneRecipe, out_dir: str | Path,
+                 ir_paths: dict[str, str] | None = None) -> tuple[Path, HelixBuild]:
+    """Genera il file .hsp. Registra prima gli IR usati; se uno non e' registrato, riprova senza e lo segnala."""
+    used = {b.ir for b in recipe.chain if b.ir}
+    wavs = [ir_paths[n] for n in used if ir_paths and n in ir_paths]
+    if wavs:
+        try:
+            register_irs(wavs)
+        except HelixError:
+            pass
     if not library_status()["ready"]:
         raise HelixError(
             "La libreria helixgen e' vuota: importa prima almeno un tuo export .hsp "
@@ -342,7 +350,7 @@ def generate_hsp(recipe: ToneRecipe, out_dir: str | Path) -> tuple[Path, HelixBu
 
     r = attempt(build.spec)
     if r.returncode != 0 and re.search(r"\bIR\b|irhash|impulse", r.stderr, re.I):
-        for blk in build.spec["paths"][0]["blocks"]:
+        for blk in (b for p in build.spec["paths"] for b in p["blocks"]):
             if blk.pop("ir", None):
                 build.warnings.append(
                     f"IR non registrato per '{blk['block']}': il cab resta senza IR, "

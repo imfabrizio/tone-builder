@@ -432,6 +432,7 @@ function renderBoard() {
     html += "<td style='background:none;cursor:default'></td></tr>";
   }
   $("#matrix").innerHTML = html + "</tbody>";
+  renderUses();
 }
 
 function knobInputs(settings, prefix) {
@@ -808,7 +809,7 @@ async function executeAction(action) {
     await saveNow();
     const label = { design_song: "Creo il preset… (circa un minuto)", edit_song: "Modifico il preset…",
       generic_patches: "Preparo le patch generiche…", analyze_youtube: "Avvio l'ascolto dei brani…",
-      design_all: "Avvio la creazione dei preset…" }[action.type] || "Lo faccio…";
+      design_all: "Avvio la creazione dei preset…", edit_many: "Avvio la modifica di tutti i preset…" }[action.type] || "Lo faccio…";
     res = await busy(label, () => api("POST", "/api/dialog/execute", { setlist_id: S.setlist.id, action }));
   } catch (err) {
     log.push({ who: "ai", text: err.message, err: true });
@@ -816,7 +817,7 @@ async function executeAction(action) {
     return;
   }
   if (res.job) {
-    await pollJob(res.job, { youtube: "Ascolto i brani", "design-all": "Creo i preset", generic: "Creo le patch generiche" }[res.job]);
+    await pollJob(res.job, { youtube: "Ascolto i brani", "design-all": "Creo i preset", generic: "Creo le patch generiche", "edit-many": "Modifico i preset" }[res.job]);
     log.push({ who: "ai", text: "Fatto. Trovi tutto nella scaletta: dimmi cosa vuoi ritoccare." });
   } else {
     await openSetlist(S.setlist.id, res.song_index);
@@ -1663,6 +1664,95 @@ async function suggestGuitars() {
   } catch {}
 }
 
+/* ---------------------------------------------------------------- tutta la scaletta */
+
+const USE_ORDER = ["amp", "preamp", "cab", "ir", "drive", "comp", "gate", "eq", "mod", "delay", "reverb", "pitch", "filter", "synth", "volume", "fxloop", "other"];
+
+function overviewCell(blocks, roles) {
+  const xs = blocks.filter((b) => roles.includes(b.role));
+  return xs.map((b) => b.role === "ir" ? `IR ${esc(b.ir || b.name)}`
+    : `${esc(b.name)}${b.ir ? ` <small>IR ${esc(b.ir)}</small>` : ""}`).join("<br>") || "—";
+}
+
+async function renderWhole() {
+  const rows = await api("GET", `/api/setlists/${S.setlist.id}/overview`);
+  const head = `<thead><tr><th>Brano / patch</th><th>Ampli</th><th>Cab / IR</th><th>Drive e dinamica</th><th>Effetti</th><th>Snapshot</th></tr></thead>`;
+  $("#wholeOverview").innerHTML = head + "<tbody>" + rows.map((r) => {
+    const title = `${r.kind === "patch" ? "<strong>Patch</strong> " : ""}${esc(r.title || "senza titolo")}${r.artist && r.kind !== "patch" ? ` <small>${esc(r.artist)}</small>` : ""}`;
+    if (!r.has_recipe) {
+      return `<tr><td><button class="link" data-goto="${r.index}">${title}</button></td><td colspan="5" class="muted">${r.uses_patch_name ? `usa la patch ${esc(r.uses_patch_name)}` : "nessun preset"}</td></tr>`;
+    }
+    const b = r.blocks;
+    return `<tr><td><button class="link" data-goto="${r.index}">${title}</button></td>
+      <td>${overviewCell(b, ["amp", "preamp", "fxloop"])}</td><td>${overviewCell(b, ["cab", "ir"])}</td>
+      <td>${overviewCell(b, ["drive", "comp", "gate", "eq"])}</td><td>${overviewCell(b, ["mod", "delay", "reverb", "pitch", "filter", "synth"])}</td>
+      <td>${esc((r.snapshots || []).join(", "))}</td></tr>`;
+  }).join("") + "</tbody>";
+  try {
+    const ir = await api("GET", "/api/irs");
+    $("#wholeIrs").textContent = ir.count
+      ? `Ho trovato ${ir.count} tuoi IR nelle cartelle impostate: se chiedi di usarli, scelgo tra questi.`
+      : "Non ho trovato tuoi IR: per farli usare indica la cartella con i file .wav in Impostazioni, Cartelle con IR.";
+  } catch {}
+}
+
+async function openWhole() {
+  if (!S.setlist) { toast("Apri prima una scaletta", true); return; }
+  await saveNow();
+  $("#wholeDlg").showModal();
+  await renderWhole();
+}
+
+async function wholeCreate() {
+  const redo = $("#wholeRedo").checked;
+  const n = S.setlist.songs.filter((s) => (redo || !s.recipe) && !s.uses_patch && s.kind !== "patch").length;
+  if (!n) { toast("Tutti i brani hanno già un preset o una patch generica: per rifarli spunta Rifai da zero", true); return; }
+  if (!confirm(redo ? `Rifaccio da zero i preset di ${n} brani (i preset attuali restano annullabili). Procedo?`
+    : `Creo i preset per ${n} brani, uno dopo l'altro (circa 1 minuto a brano). Procedo?`)) return;
+  await saveNow();
+  await api("POST", `/api/setlists/${S.setlist.id}/design-all`, { description: $("#wholeDesc").value.trim(), redo });
+  $("#wholeDlg").close();
+  await pollJob("design-all", "Creo i preset");
+}
+
+async function wholeEdit() {
+  const instruction = $("#wholeEdit").value.trim();
+  if (!instruction) { toast("Scrivi cosa cambiare", true); return; }
+  await saveNow();
+  await api("POST", `/api/setlists/${S.setlist.id}/edit-many`, { instruction, target: $("#wholeTarget").value });
+  $("#wholeDlg").close();
+  await pollJob("edit-many", "Modifico i preset");
+}
+
+async function wholeZip() {
+  await saveNow();
+  await busy("Creo i file Helix di tutta la scaletta…", async () => {
+    const r = await fetch(`/api/setlists/${S.setlist.id}/helix-zip`, { method: "POST" });
+    if (!r.ok) { let m = `Errore ${r.status}`; try { m = (await r.json()).detail || m; } catch {} throw new Error(m); }
+    const blob = await r.blob();
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `${S.setlist.name || "scaletta"} - Helix.zip`;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+    const probs = Number(r.headers.get("X-Problems") || 0);
+    toast(`Creati ${r.headers.get("X-Created")} file${probs ? `, ${probs} avvisi: li trovi in LEGGIMI-avvisi.txt dentro lo zip` : ""}`, probs > 0);
+  });
+}
+
+/* tabella "cosa usa questo preset" */
+function renderUses() {
+  const r = recipe();
+  const t = $("#usesTable");
+  if (!r) { t.innerHTML = ""; return; }
+  const chg = new Set(song()?.last_changes?.blocks || []);
+  const rows = [...r.chain].sort((a, b) => (a.line || 1) - (b.line || 1));
+  t.innerHTML = `<thead><tr><th>Linea</th><th>Tipo</th><th>Modello</th><th>Helix</th><th>Quad Cortex</th><th>IR</th><th>Di base</th></tr></thead><tbody>${
+    rows.map((b) => `<tr class="${chg.has(b.id) ? "chg" : ""}"><td>${b.line || 1}</td><td>${esc(ROLE_IT[b.role] || b.role)}</td>
+      <td>${esc(b.gear_ref || b.label || b.id)}</td><td>${esc(b.helix?.model || "—")}</td><td>${esc(b.qc?.model || "—")}</td>
+      <td>${esc(b.ir || "—")}</td><td>${b.enabled ? "acceso" : "spento"}</td></tr>`).join("")}</tbody>`;
+}
+
 async function designAll() {
   const missing = S.setlist.songs.filter((s) => !s.recipe && !s.uses_patch && s.kind !== "patch").length;
   if (!missing) { toast("Tutti i brani hanno già un preset o una patch generica"); return; }
@@ -1678,7 +1768,18 @@ function bindSetlistTools() {
   $("#importRun").addEventListener("click", runImport);
   $("#spotifyConnect").addEventListener("click", () => { location.href = "/api/spotify/login"; });
   $("#suggestGuitars").addEventListener("click", suggestGuitars);
-  $("#designAll").addEventListener("click", () => designAll().catch((e) => toast(e.message, true)));
+  $("#openWhole").addEventListener("click", () => openWhole().catch((e) => toast(e.message, true)));
+  $("#wholeClose").addEventListener("click", () => $("#wholeDlg").close());
+  $("#wholeCreate").addEventListener("click", () => wholeCreate().catch((e) => toast(e.message, true)));
+  $("#wholeEditRun").addEventListener("click", () => wholeEdit().catch((e) => toast(e.message, true)));
+  $("#wholeZip").addEventListener("click", () => wholeZip().catch((e) => toast(e.message, true)));
+  $("#wholeOverview").addEventListener("click", async (e) => {
+    const b = e.target.closest("[data-goto]");
+    if (!b) return;
+    $("#wholeDlg").close();
+    await openSetlist(S.setlist.id, Number(b.dataset.goto));
+    switchTab("preset");
+  });
 }
 
 /* ---------------------------------------------------------------- avvio */

@@ -31,7 +31,7 @@
     <button class="btn wide ghost" id="ytAll">Ascolta i brani da YouTube</button>
     <button class="btn wide ghost" id="suggestGuitars">Proponi le chitarre</button>
     <button class="btn wide ghost" id="openReduce">Riduci a patch generiche</button>
-    <button class="btn wide ghost" id="designAll">Crea tutti i preset</button>
+    <button class="btn wide" id="openWhole">Tutta la scaletta</button>
     <button class="btn wide ghost" id="openMerge">Unisci suoni da più preset</button>
   </aside>
 
@@ -109,6 +109,11 @@
           <div class="changebar hidden" id="changeBar" role="status"></div>
           <div class="board" id="board" aria-label="Catena del segnale"></div>
           <div class="block-editor hidden" id="blockEditor"></div>
+
+          <details class="uses" id="usesBox" open>
+            <summary>Cosa usa questo preset</summary>
+            <div class="table-wrap"><table class="uses-table" id="usesTable"></table></div>
+          </details>
 
           <h2 class="sec">Snapshot</h2>
           <div class="matrix-wrap"><table class="matrix" id="matrix"></table></div>
@@ -301,6 +306,46 @@
       <button class="btn ghost" id="reduceClose">Chiudi</button>
       <button class="btn primary hidden" id="reduceCreate">Crea queste patch</button>
     </div>
+  </div>
+</dialog>
+
+<dialog id="wholeDlg" class="dlg wide">
+  <div class="dlg-body">
+    <h2>Tutta la scaletta</h2>
+    <p class="hint">Qui lavori su tutti i brani insieme. Per ogni brano uso la sua descrizione, la chitarra scelta e, se c'è, l'ascolto da YouTube.</p>
+
+    <h3>Crea i preset</h3>
+    <div class="field"><label for="wholeDesc">Indicazioni comuni (facoltative, valgono per i brani senza descrizione)</label>
+      <input id="wholeDesc" placeholder="Es. suoni da live, delay sempre a tempo, niente fuzz"></div>
+    <div class="row">
+      <label class="check"><input type="checkbox" id="wholeRedo"> Rifai da zero anche i preset già fatti</label>
+      <button class="btn primary" id="wholeCreate">Crea i preset</button>
+    </div>
+
+    <h3>Modifica tutti i preset</h3>
+    <div class="field"><label for="wholeEdit">Cosa cambiare (modifico quelli esistenti, non ne creo di nuovi)</label>
+      <textarea id="wholeEdit" rows="2" placeholder="Es. usa i miei IR al posto dei cab; meno riverbero ovunque; alza di 1 dB gli snapshot assolo"></textarea></div>
+    <div class="row">
+      <label for="wholeTarget">Su quali</label>
+      <select id="wholeTarget">
+        <option value="all">Tutti i preset e le patch</option>
+        <option value="patches">Solo le patch generiche</option>
+        <option value="songs">Solo i preset dei brani</option>
+      </select>
+      <button class="btn primary" id="wholeEditRun">Applica a tutti</button>
+    </div>
+    <p class="hint" id="wholeIrs"></p>
+
+    <h3>File</h3>
+    <div class="row">
+      <button class="btn" id="wholeZip">Scarica tutti i file Helix (.zip)</button>
+      <span class="hint">Un file .hsp per ogni preset, numerati nell'ordine della scaletta.</span>
+    </div>
+
+    <h3>Cosa usa ogni preset</h3>
+    <div class="table-wrap"><table class="uses-table overview" id="wholeOverview"></table></div>
+
+    <div class="dlg-actions"><button class="btn ghost" id="wholeClose">Chiudi</button></div>
   </div>
 </dialog>
 

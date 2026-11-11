@@ -214,3 +214,49 @@ def test_gear_export_import_and_iridium_guide(recipe):
                       "snapshots": [{"snapshot": s["name"], "amp": "Chime"} for s in rec["snapshots"]]}
     g = c.post("/api/iridium/guide", json={"recipe": rec}).json()
     assert g["enabled"] and g["rows"][0]["preset"] == 40 and "Vox" in g["rows"][0]["amp"]
+
+
+def test_edit_many_overview_and_guard(recipe, monkeypatch, tmp_path):
+    import time
+    from tonebuilder import planner
+
+    class EditAI(StubAI):
+        def complete_json(self, system, user, *, audio_path=None):
+            r = recipe.model_dump()
+            r["chain"][1]["settings"]["gain"] = 8
+            r["chain"][2]["ir"] = "Greenback 4x12.wav"
+            return r
+
+    stub = EditAI(recipe.model_dump())
+    monkeypatch.setattr(srv, "_provider", lambda name=None: stub)
+    (tmp_path / "Greenback 4x12.wav").write_bytes(b"RIFF")
+    c = TestClient(srv.app)
+    c.put("/api/settings", json={"ir_folders": [str(tmp_path)]})
+    assert c.get("/api/irs").json()["count"] == 1
+
+    sl = c.post("/api/setlists", json={"name": "m"}).json()
+    sl["songs"] = [{"id": "p1", "kind": "patch", "title": "Crunch", "recipe": recipe.model_dump()},
+                   {"id": "s1", "title": "Zombie", "uses_patch": "p1", "uses_patch_name": "Crunch"}]
+    c.put(f"/api/setlists/{sl['id']}", json=sl)
+
+    # una richiesta di modifica non deve diventare "nuove patch"
+    act, _ = planner._guard_action({"type": "generic_patches", "max_patches": 3}, sl, "usa gli IR nelle patch")
+    assert act["type"] == "edit_many" and act["target"] == "patches"
+    act, _ = planner._guard_action({"type": "design_song", "song_index": 0, "description": "piu' gain"}, sl, "piu' gain")
+    assert act["type"] == "edit_song"
+    act, _ = planner._guard_action({"type": "generic_patches", "max_patches": 3}, sl, "rifalle da zero")
+    assert act["type"] == "generic_patches"
+
+    c.post(f"/api/setlists/{sl['id']}/edit-many", json={"instruction": "usa i miei IR", "target": "patches"})
+    for _ in range(50):
+        st = c.get(f"/api/jobs/{sl['id']}/edit-many").json()
+        if not st["running"]:
+            break
+        time.sleep(0.1)
+    assert st["done"] == 1 and not st["errors"], st
+    data = c.get(f"/api/setlists/{sl['id']}").json()
+    p = data["songs"][0]
+    assert p["recipe"]["chain"][2]["ir"] == "Greenback 4x12.wav" and p["prev_recipe"] and p["last_changes"]["items"]
+    ov = c.get(f"/api/setlists/{sl['id']}/overview").json()
+    assert ov[0]["has_recipe"] and any(b["ir"] for b in ov[0]["blocks"]) and ov[1]["uses_patch_name"] == "Crunch"
+    assert [j["kind"] for j in c.get(f"/api/setlists/{sl['id']}/jobs").json()] == ["edit-many"]
