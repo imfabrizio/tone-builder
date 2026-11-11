@@ -27,7 +27,25 @@ function Find-PyLauncher {
 
 # 1) aggiorna il codice (se e' una copia git e git e' installato)
 if ((Test-Path (Join-Path $Repo ".git")) -and (Get-Command git -ErrorAction SilentlyContinue)) {
-    try { git -C $Repo pull --ff-only -q 2>$null | Out-Null } catch { }
+    Say "Controllo gli aggiornamenti..."
+    $ErrorActionPreference = "Continue"
+    $before = (git -C $Repo rev-parse --short HEAD 2>$null)
+    git -C $Repo fetch -q origin 2>$null
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "Non riesco a scaricare gli aggiornamenti (sei offline?): uso la versione che c'e'." -ForegroundColor Red
+    } else {
+        git -C $Repo merge --ff-only -q origin/main 2>$null | Out-Null
+        if ($LASTEXITCODE -ne 0) {
+            # file locali modificati per sbaglio (es. fine riga): li metto da parte e allineo al repository
+            git -C $Repo stash push -u -q -m "tone-builder: modifiche locali messe da parte" 2>$null | Out-Null
+            git -C $Repo reset -q --hard origin/main 2>$null | Out-Null
+        }
+        $after = (git -C $Repo rev-parse --short HEAD 2>$null)
+        if ($after -ne $before) { Say "Aggiornato: versione $after" } else { Say "Gia' aggiornato: versione $after" }
+    }
+    $ErrorActionPreference = "Stop"
+} elseif (-not (Test-Path (Join-Path $Repo ".git"))) {
+    Write-Host "Questa copia di Tone Builder non e' collegata a GitHub e non si aggiorna da sola." -ForegroundColor Red
 }
 
 # 2) prima installazione, oppure dipendenze cambiate dall'ultima volta

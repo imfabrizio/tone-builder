@@ -1236,9 +1236,53 @@ def helix_catalog(role: str | None = None) -> list[dict]:
 
 # ------------------------------------------------------------------ interfaccia
 
+def app_version() -> dict:
+    """Versione del codice in uso: commit git (se e' una copia git) e data dell'ultimo aggiornamento."""
+    import subprocess
+    root = Path(__file__).resolve().parent.parent
+    info = {"commit": "", "date": ""}
+    try:
+        out = subprocess.run(["git", "-C", str(root), "log", "-1", "--format=%h|%cd", "--date=format:%d/%m/%Y %H:%M"],
+                             capture_output=True, text=True, timeout=5)
+        if out.returncode == 0 and "|" in out.stdout:
+            info["commit"], info["date"] = out.stdout.strip().split("|", 1)
+    except Exception:
+        pass
+    if not info["commit"]:
+        # nessun git (es. exe): uso la data dei file dell'interfaccia
+        import datetime
+        ts = max(f.stat().st_mtime for f in WEB.iterdir() if f.is_file())
+        info["date"] = datetime.datetime.fromtimestamp(ts).strftime("%d/%m/%Y %H:%M")
+    return info
+
+
+_VERSION = app_version()
+
+
+@app.get("/api/version")
+def api_version() -> dict:
+    return _VERSION
+
+
+NO_CACHE = {"Cache-Control": "no-cache, no-store, must-revalidate", "Pragma": "no-cache", "Expires": "0"}
+
+
 @app.get("/", response_class=HTMLResponse)
-def index() -> str:
-    return WEB.joinpath("index.html").read_text(encoding="utf-8")
+def index() -> HTMLResponse:
+    # il numero di versione negli URL obbliga il browser a ricaricare app.js e styles.css dopo ogni aggiornamento
+    tag = _VERSION["commit"] or str(int(max(f.stat().st_mtime for f in WEB.iterdir() if f.is_file())))
+    html = WEB.joinpath("index.html").read_text(encoding="utf-8")
+    html = html.replace("/static/app.js", f"/static/app.js?v={tag}").replace("/static/styles.css", f"/static/styles.css?v={tag}")
+    return HTMLResponse(html, headers=NO_CACHE)
+
+
+@app.middleware("http")
+async def _no_cache_static(request, call_next):
+    resp = await call_next(request)
+    if request.url.path.startswith("/static/"):
+        for k, v in NO_CACHE.items():
+            resp.headers[k] = v
+    return resp
 
 
 app.mount("/static", StaticFiles(directory=str(WEB)), name="static")

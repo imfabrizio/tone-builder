@@ -414,3 +414,6 @@ code { background: var(--tolex); padding: 1px 5px; border-radius: 3px; font-size
 #assignTable tr.pend td { background: rgba(242,169,59,.08); }
 #assignTable small { display: block; color: var(--ink-2); }
 .songs .uses.sugg { opacity: .65; font-style: italic; }
+
+.topbar .ver { font-size: 12px; color: var(--ink-2); margin-left: 12px; white-space: nowrap; }
+@media (max-width: 900px) { .topbar .ver { display: none; } }

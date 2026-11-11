@@ -845,6 +845,15 @@ async function executeAction(action) {
   saveSoon();
 }
 
+/* versione in uso, per capire se l'aggiornamento e' arrivato */
+api("GET", "/api/version").then((v) => {
+  const el = document.createElement("span");
+  el.className = "ver";
+  el.textContent = v.commit ? `Versione ${v.commit} del ${v.date}` : `Versione del ${v.date}`;
+  el.title = "Se dopo un aggiornamento questa data non cambia, il programma non si è aggiornato";
+  document.querySelector(".topbar")?.appendChild(el);
+}).catch(() => {});
+
 /* barra dei lavori in background: resta visibile anche dopo un ricaricamento */
 const jobSeen = {};
 async function refreshJobBar() {
