@@ -223,3 +223,10 @@ def test_two_lines_on_both_devices(recipe):
     fake = FakeQC()
     qcb.execute_plan(plan, client=fake)
     assert ("set_chain_output", (0, 16), {}) in fake.calls
+
+
+def test_level_knob_on_db_params_is_unity_at_5():
+    p = ParamDef("Level", -60, 6, 0)
+    assert to_native("level", 5, p) == 0
+    assert to_native("level", 7, p) == 2.4
+    assert to_neutral("level", 2.4, p) == 7

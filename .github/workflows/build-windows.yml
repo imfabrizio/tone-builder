@@ -29,6 +29,16 @@ jobs:
       - name: Test
         run: python -m pytest -q
 
+      - name: Prova del lanciatore avvia.ps1 (installazione da zero)
+        shell: pwsh
+        env:
+          TB_NOPAUSE: "1"
+        run: |
+          powershell -NoProfile -ExecutionPolicy Bypass -File packaging\avvia.ps1 -SoloInstalla
+          if ($LASTEXITCODE -ne 0) { throw "avvia.ps1 non riuscito" }
+          & "$env:USERPROFILE\.venvs\tone-builder\Scripts\python.exe" -c "import tonebuilder.server; print('ok')"
+          if (-not (Test-Path "$env:USERPROFILE\.venvs\tone-builder\pyproject.installed")) { throw "stamp mancante" }
+
       - name: Libreria USB per il Quad Cortex (hidapi)
         shell: pwsh
         run: |
@@ -38,7 +48,7 @@ jobs:
 
       - name: Build
         run: >
-          pyinstaller --noconfirm --onefile --name ToneBuilder
+          pyinstaller --noconfirm --onefile --name ToneBuilder --icon packaging/tonebuilder.ico
           --add-binary "hidapi.dll;."
           --collect-all helixgen --collect-all pyquadcortex --collect-all zmq --hidden-import msgpack
           --collect-data tonebuilder --collect-submodules tonebuilder

@@ -83,6 +83,19 @@ MANOPOLE NEUTRE (campo "settings" e "overrides"):
 - scala 0-10 come su un ampli vero: {', '.join(k for k in KNOB_ALIASES if not k.endswith(('_ms', '_db', '_hz')) and k != 'ratio')}
 - in millisecondi: time_ms, predelay_ms, attack_ms; in dB: level_db, threshold_db; in Hz: low_cut_hz, high_cut_hz; ratio come numero.
 - Usa SOLO queste chiavi. Il programma le traduce nei parametri nativi.
+- level dei blocchi: 5 = volume invariato (unity), ogni punto ~1.2 dB. Pedali drive usati come boost: level 6-8.
+  Modulazioni, delay, riverberi: level 5 (il loro volume si regola con mix).
+"""
+
+GAIN_RULES = """
+GAIN E VOLUMI (importante: i preset devono suonare pieni e alla pari, pronti per il live):
+- gain dell'ampli (scala 0-10): pulito 2-4, crunch 5-6.5, ritmica distorta 6.5-8, lead 8-9.5. Per rock e alternative
+  anni '90 la ritmica distorta e' piena e satura, non "soft": non stare bassi.
+- drive/overdrive davanti all'ampli: come boost drive 1-3 e level 7-8; come distorsione vera drive 6-9.
+- channel_volume e master dell'ampli 6-8, presence 5-7.
+- mix: chorus 4-6, delay 2-3.5 (assolo fino a 4.5), riverbero 2-3.5.
+- level_db degli snapshot per pareggiare i volumi: 0 come riferimento, puliti +1/+2 (suonano piu' piano),
+  assolo +2/+3 rispetto alla ritmica.
 """
 
 RULES = """
@@ -129,7 +142,7 @@ def system_prompt() -> str:
     return (
         "Sei un tecnico del suono esperto di chitarra e di multieffetti Line 6 Helix Stadium e "
         "Neural DSP Quad Cortex. Progetti preset pronti all'uso partendo da una canzone e da una descrizione.\n"
-        + RECIPE_FORMAT + KNOB_RULES + RULES + _library_rule() + "\n" + _catalog_block()
+        + RECIPE_FORMAT + KNOB_RULES + GAIN_RULES + RULES + _library_rule() + "\n" + _catalog_block()
     )
 
 

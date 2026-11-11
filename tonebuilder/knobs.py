@@ -67,6 +67,20 @@ def find_param(knob: str, params: dict[str, ParamDef]) -> ParamDef | None:
     return None
 
 
+DB_PER_STEP = 1.2
+
+
+def is_db_param(p: ParamDef) -> bool:
+    """Range tipico di un volume in dB: parte da sotto zero e arriva a pochi dB sopra."""
+    return p.min <= -20 and 0 < p.max <= 24
+
+
+def _db_base(p: ParamDef) -> float:
+    if p.default is not None and p.min <= p.default <= p.max:
+        return float(p.default)
+    return 0.0
+
+
 def to_native(knob: str, value: float, p: ParamDef) -> float:
     """Converte il valore neutro nell'unita' del parametro nativo, con clamp."""
     lo, hi = p.min, p.max
@@ -75,6 +89,11 @@ def to_native(knob: str, value: float, p: ParamDef) -> float:
         v = value / 1000.0 if hi <= 20 else value
     elif knob.endswith(("_db", "_hz")) or knob == "ratio":
         v = value
+    elif is_db_param(p):
+        # parametro in dB (es. Level -60..+6): 5 = livello di riferimento del
+        # blocco (di solito 0 dB, nessun cambio di volume), ogni punto ~1.2 dB.
+        # Una scala lineare su -60..+6 metterebbe "livello 7" a circa -14 dB.
+        v = _db_base(p) + (max(0.0, min(10.0, value)) - 5.0) * DB_PER_STEP
     else:  # manopola 0..10
         frac = max(0.0, min(10.0, value)) / 10.0
         v = lo + (hi - lo) * frac
@@ -90,6 +109,8 @@ def to_neutral(knob: str, native: float, p: ParamDef) -> float:
         return round(native * 1000.0 if p.max <= 20 else native, 1)
     if knob.endswith(("_db", "_hz")) or knob == "ratio":
         return round(native, 2)
+    if is_db_param(p):
+        return round(max(0.0, min(10.0, 5.0 + (native - _db_base(p)) / DB_PER_STEP)), 2)
     if p.max == p.min:
         return 0.0
     return round(10.0 * (native - p.min) / (p.max - p.min), 2)

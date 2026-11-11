@@ -12,6 +12,10 @@ Dalla canzone al preset: descrivi il suono (o carica la traccia), e Tone Builder
 - **Scaletta**: tutti i brani di una serata in un progetto.
 - **AI a scelta**: Gemini, Claude, oppure qualsiasi servizio compatibile OpenAI (anche modelli locali con Ollama / LM Studio).
 
+## Windows: la via più semplice
+
+Scarica il progetto ([Code > Download ZIP](https://github.com/imfabrizio/tone-builder/archive/refs/heads/main.zip) ed estrailo, oppure `git clone`) e fai doppio clic su **avvia.bat**. La prima volta installa da solo Python e tutto il necessario (qualche minuto) e crea l'icona **Tone Builder** sul desktop. Dalle volte successive basta l'icona: se il progetto è una copia git, l'app si aggiorna da sola a ogni avvio.
+
 ## Windows: eseguibile pronto
 
 Scarica **ToneBuilder.exe** dalla sezione [Releases](https://github.com/imfabrizio/tone-builder/releases/tag/latest) e avvialo con doppio clic: si apre una finestra nera (il motore dell'app, lasciala aperta) e il browser con l'interfaccia. Per chiudere l'app chiudi quella finestra.
