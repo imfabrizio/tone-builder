@@ -21,6 +21,8 @@ const KNOB_IT = {
   time_ms: "Tempo (ms)", predelay_ms: "Predelay (ms)", attack_ms: "Attacco (ms)", level_db: "Livello (dB)",
   threshold_db: "Soglia (dB)", low_cut_hz: "Taglio bassi (Hz)", high_cut_hz: "Taglio alti (Hz)", ratio: "Rapporto",
 };
+const MAX_AMPS = 2;
+const ampsInLine = (r, ln) => r.chain.filter((x) => (x.line || 1) === ln && (x.role === "amp" || x.role === "preamp")).length;
 const isScale10 = (k) => !/_ms$|_db$|_hz$|^ratio$/.test(k);
 
 const S = {
@@ -486,6 +488,10 @@ function bindPreset() {
       if (e.target.value) r.footswitches.push({ switch: e.target.value, block_id: b.id, label: b.label || "" });
     } else if (f) b[f] = e.target.value;
     else return;
+    if ((f === "role" || f === "line") && ampsInLine(r, b.line || 1) > MAX_AMPS) {
+      toast(`Al massimo ${MAX_AMPS} ampli per linea: spostalo sull'altra linea o togli un ampli`, true);
+      if (f === "role") b.role = "other"; else b.line = b.line === 1 ? 2 : 1;
+    }
     recipeChanged();
   });
   be.addEventListener("click", (e) => {

@@ -230,3 +230,23 @@ def test_level_knob_on_db_params_is_unity_at_5():
     assert to_native("level", 5, p) == 0
     assert to_native("level", 7, p) == 2.4
     assert to_neutral("level", 2.4, p) == 7
+
+
+def test_max_two_amps_per_line(recipe):
+    data = recipe.model_dump()
+    for i in (2, 3):
+        data["chain"].append({**data["chain"][1], "id": f"amp{i}"})
+    with pytest.raises(Exception, match="al massimo 2 ampli"):
+        ToneRecipe.model_validate(data)
+    data["chain"][-1]["line"] = 2
+    ToneRecipe.model_validate(data)  # due sulla linea 1, uno sulla linea 2: ok
+
+
+def test_merge_respects_amp_limit():
+    fams = [("Fender Twin", "Agoura_AmpUSDoubleBlack"), ("Marshall Plexi", "Agoura_AmpBritPlexi"),
+            ("Mesa Rectifier", "Agoura_AmpCali2CPlus"), ("Vox AC30", "HD2_AmpEssexA30"),
+            ("Orange Rockerverb", ""), ("Dumble ODS", "")]
+    picks = [Pick(_patch(f"P{i}", ref, mid, 5), None, f"S{i}") for i, (ref, mid) in enumerate(fams)]
+    r = merge(picks, accept="all")
+    for ln in (1, 2):
+        assert sum(1 for b in r.recipe.chain if b.line == ln and b.role == Role.amp) <= 2

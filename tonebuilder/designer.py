@@ -110,6 +110,7 @@ REGOLE:
    - linea 1 (max 8 blocchi): gate, compressore, wah, boost e drive, ampli (anche 2 ampli diversi, es. uno pulito
      e uno saturo accesi in snapshot diversi), cab/IR;
    - linea 2 (max 8 blocchi): EQ, modulazioni (chorus, flanger, phaser, tremolo), delay, riverberi, volume/boost finale.
+   MAI piu' di 2 ampli (amp o preamp) per linea: e' un limite rigido.
    Una patch completa da live ha di solito 10-14 blocchi. Non lasciare la linea 2 vuota se il brano usa effetti.
    Ordine dei blocchi = ordine del segnale dentro ogni linea.
 5. Uno snapshot per ogni sezione richiesta (max 8). Negli snapshot cambia solo cio' che serve:

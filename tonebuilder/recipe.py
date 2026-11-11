@@ -43,6 +43,10 @@ class Role(str, Enum):
     other = "other"
 
 
+MAX_AMPS_PER_LINE = 2
+AMP_ROLES = {Role.amp, Role.preamp}
+
+
 class DeviceModel(BaseModel):
     """Scelta concreta su un dispositivo: modello e parametri nativi."""
 
@@ -130,6 +134,11 @@ class ToneRecipe(BaseModel):
                 raise ValueError(f"footswitch {f.switch} cita blocco inesistente: {f.block_id}")
         if len(self.snapshots) > 8:
             raise ValueError("massimo 8 snapshot/scene")
+        for ln in (1, 2):
+            amps = [b.id for b in self.chain if b.line == ln and b.role in AMP_ROLES]
+            if len(amps) > MAX_AMPS_PER_LINE:
+                raise ValueError(f"la linea {ln} ha {len(amps)} ampli ({', '.join(amps)}): "
+                                 f"al massimo {MAX_AMPS_PER_LINE} ampli per linea")
         return self
 
     def line_blocks(self, line: int) -> list[Block]:

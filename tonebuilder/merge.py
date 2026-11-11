@@ -19,7 +19,7 @@ import re
 from dataclasses import dataclass, field
 
 from .dsp import ROLE_ORDER, BUDGET, estimate_blocks
-from .recipe import Block, Footswitch, Role, Snapshot, SongInfo, ToneRecipe
+from .recipe import MAX_AMPS_PER_LINE, Block, Footswitch, Role, Snapshot, SongInfo, ToneRecipe
 
 # famiglia di ampli -> parole chiave (gear_ref, nome modello, id)
 AMP_FAMILIES: dict[str, list[str]] = {
@@ -230,6 +230,27 @@ def merge(picks: list[Pick], name: str = "Merged", accept: list[str] | str | Non
     applied_ids = {c.id for c in applied}
     proposed = [c for c in proposed_all if c.id not in applied_ids]
 
+    # 2b) limite rigido: massimo 2 ampli per linea (4 in tutto). Oltre, gli ampli
+    # di famiglie affini vengono unificati d'ufficio.
+    def n_amps() -> int:
+        return sum(1 for it in items if it.role in (Role.amp, Role.preamp))
+
+    for g in _GROUP_ORDER:
+        if n_amps() <= 2 * MAX_AMPS_PER_LINE:
+            break
+        if _amp_group(g)(items):
+            c = Compromise(f"amp_group_{g}", f"Unifico gli ampli di famiglie affini ({g.replace('_', ' ')}): "
+                                             f"massimo {MAX_AMPS_PER_LINE} ampli per linea", "amp")
+            if c.id not in {x.id for x in applied}:
+                applied.append(c)
+            proposed = [x for x in proposed if x.id != c.id]
+    while n_amps() > 2 * MAX_AMPS_PER_LINE:
+        amps = [it for it in items if it.role in (Role.amp, Role.preamp)]
+        last, prev = amps[-1], amps[-2]
+        prev.contribs.extend(last.contribs)
+        items.remove(last)
+        applied.append(Compromise("amp_limit", "Unifico gli ampli in eccesso: massimo 2 ampli per linea", "amp"))
+
     # 3) costruzione ricetta finale
     items.sort(key=lambda it: ROLE_ORDER.index(it.role) if it.role in ROLE_ORDER else 99)
     chain: list[Block] = []
@@ -237,9 +258,16 @@ def merge(picks: list[Pick], name: str = "Merged", accept: list[str] | str | Non
     used_ids: set[str] = set()
     footswitches: list[Footswitch] = []
 
+    # ampli oltre il secondo sulla linea 2, insieme al loro cab
+    amp_line: dict[str, int] = {}
+    for it in items:
+        if it.role in (Role.amp, Role.preamp):
+            amp_line[it.key.split(":", 1)[1]] = 1 if len(amp_line) < MAX_AMPS_PER_LINE else 2
     for it in items:
         first = it.contribs[0]
         base = first.block.model_copy(deep=True)
+        if it.role in (Role.amp, Role.preamp, Role.cab):
+            base.line = amp_line.get(it.key.split(":", 1)[1], 1)
         bid = re.sub(r"\W+", "_", f"{it.role.value}") or "blk"
         n = 1
         while f"{bid}{n}" in used_ids:
