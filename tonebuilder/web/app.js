@@ -2018,7 +2018,7 @@ function bindAll() {
   $("#helixBtn").addEventListener("click", () => makeHelix().catch(() => {}));
   $("#dupBtn").addEventListener("click", duplicateSong);
   $("#delPresetBtn").addEventListener("click", deletePreset);
-  ["#chatInput", "#reqDescription", "#reqSnapshots", "#reqPrefs", "#reqGuitar"].forEach((sel) => attachMic($(sel)));
+  ["#chatInput", "#reqDescription", "#reqSnapshots", "#reqPrefs", "#reqGuitar", "#wholeDesc", "#wholeEdit"].forEach((sel) => attachMic($(sel)));
   $("#qcBtn").addEventListener("click", openQC);
   $("#qcPlanBtn").addEventListener("click", () => qcPlan().catch(() => {}));
   $("#qcConfirm").addEventListener("change", (e) => { $("#qcRunBtn").disabled = !(e.target.checked && S.qcPlan); });
