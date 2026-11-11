@@ -64,10 +64,14 @@ def propose_groups(songs: list[dict], max_patches: int, notes: str, gear_text: s
             + (f"STRUMENTAZIONE:\n{gear_text}\n" if gear_text else "")
             + f"\nSCALETTA:\n{_listing(songs)}")
     data = provider.complete_json(GROUP_PROMPT, user)
+    return _clean_proposal(data, songs, max_patches)
+
+
+def _clean_proposal(data: dict, songs: list[dict], max_patches: int) -> dict:
     valid = {i for i, s in enumerate(songs) if s.get("kind") != "patch"}
     seen: set[int] = set()
     patches = []
-    for p in data.get("patches", [])[:max_patches]:
+    for p in (data.get("patches") or [])[:max_patches]:
         rows = []
         for r in p.get("songs", []):
             try:
@@ -88,6 +92,25 @@ def propose_groups(songs: list[dict], max_patches: int, notes: str, gear_text: s
     if not patches:
         raise AIError("L'AI non ha proposto patch valide: riprova")
     return {"patches": patches, "notes": str(data.get("notes") or "")}
+
+
+def revise_groups(songs: list[dict], proposal: dict, history: list[dict], max_patches: int,
+                  gear_text: str, provider: LLMProvider) -> dict[str, Any]:
+    import json
+
+    convo = "\n".join(f"{'CHITARRISTA' if m.get('who') == 'me' else 'TU'}: {m.get('text', '')}" for m in history[-16:])
+    user = (f"NUMERO MASSIMO DI PATCH: {max_patches}\n"
+            + (f"STRUMENTAZIONE:\n{gear_text}\n" if gear_text else "")
+            + f"\nSCALETTA:\n{_listing(songs)}\n\nPROPOSTA ATTUALE:\n{json.dumps(proposal, ensure_ascii=False)}"
+            + f"\n\nCONVERSAZIONE:\n{convo}\n\nRispondi all'ultimo messaggio.")
+    data = provider.complete_json(REVISE_PROMPT, user)
+    new = data.get("proposal") if isinstance(data.get("proposal"), dict) else proposal
+    # se il chitarrista ha chiesto piu' patch, il nuovo massimo e' quello proposto
+    limit = max(max_patches, len(new.get("patches") or [])) if len(new.get("patches") or []) <= 8 else 8
+    cleaned = _clean_proposal(new, songs, limit)
+    last = next((m.get("text", "") for m in reversed(history) if m.get("who") == "me"), "")
+    go = bool(data.get("go")) and bool(_OK.search(last))
+    return {"reply": str(data.get("reply") or "Ok."), "proposal": cleaned, "go": go}
 
 
 def generic_request(group: dict, songs: list[dict], gear_text: str) -> DesignRequest:
@@ -175,4 +198,4 @@ def transcribe_prompt() -> str:
             "senza commenti. Se non si sente nulla, restituisci una stringa vuota.")
 
 
-__all__ = ["propose_groups", "generic_request", "converse", "setlist_context", "transcribe_prompt", "GENERIC_SNAPSHOTS"]
+__all__ = ["revise_groups", "propose_groups", "generic_request", "converse", "setlist_context", "transcribe_prompt", "GENERIC_SNAPSHOTS"]

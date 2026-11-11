@@ -937,9 +937,80 @@ async function ytAll() {
 S.reduceProposal = null;
 function openReduce() {
   S.reduceProposal = null;
+  S.reduceChat = [];
   $("#reduceResult").innerHTML = "";
+  $("#reduceChat").innerHTML = "";
+  $("#reduceTalk").classList.add("hidden");
   $("#reduceCreate").classList.add("hidden");
   $("#reduceDlg").showModal();
+}
+
+function renderReduceChat() {
+  const c = $("#reduceChat");
+  c.innerHTML = S.reduceChat.map((m) => `<div class="msg ${m.who} ${m.err ? "err" : ""}">${esc(m.text)}</div>`).join("");
+  c.scrollTop = c.scrollHeight;
+}
+
+/* un turno di dialogo sulla proposta: ritorna la risposta; se l'utente da' l'ok crea le patch */
+async function reduceTurn(text) {
+  S.reduceChat.push({ who: "me", text });
+  renderReduceChat();
+  let res;
+  try {
+    res = await api("POST", `/api/setlists/${S.setlist.id}/group-revise`, {
+      proposal: S.reduceProposal, max_patches: +$("#reduceMax").value || 4,
+      history: S.reduceChat.filter((m) => !m.err).map(({ who, text }) => ({ who, text })) });
+  } catch (e) {
+    S.reduceChat.push({ who: "ai", text: e.message, err: true });
+    renderReduceChat();
+    return "";
+  }
+  S.reduceProposal = res.proposal;
+  S.reduceChat.push({ who: "ai", text: res.reply });
+  renderProposal();
+  renderReduceChat();
+  if (res.go) {
+    if ($("#speakReplies").checked) await speak(res.reply);
+    reduceTalk.on = false;
+    await createGeneric();
+    return "";
+  }
+  return res.reply;
+}
+
+async function createGeneric() {
+  if (!S.reduceProposal) return;
+  $("#reduceDlg").close();
+  try {
+    await saveNow();
+    await api("POST", `/api/setlists/${S.setlist.id}/generic-patches`, { proposal: S.reduceProposal });
+    await pollJob("generic", "Creo le patch generiche");
+  } catch (e) { toast(e.message, true); }
+}
+
+const reduceTalk = { on: false, ctl: {} };
+async function reduceTalkLoop() {
+  const b = $("#reduceTalkBtn");
+  const state = (st) => { b.classList.remove("listening", "speaking"); if (st) b.classList.add(st);
+    b.textContent = { listening: "Ti ascolto…", speaking: "Parlo…", thinking: "Ci penso…" }[st] || "Parla"; };
+  if (reduceTalk.on) { reduceTalk.on = false; reduceTalk.ctl.stop?.(); window.speechSynthesis?.cancel(); state(null); return; }
+  reduceTalk.on = true;
+  let empty = 0;
+  while (reduceTalk.on && $("#reduceDlg").open) {
+    state("listening");
+    let text = "";
+    try { text = (await listenOnce(reduceTalk.ctl)).trim(); } catch (e) { toast(e.message, true); break; }
+    if (!reduceTalk.on) break;
+    if (!text) { if (++empty >= 2) break; continue; }
+    empty = 0;
+    state("thinking");
+    const reply = await reduceTurn(text);
+    if (!reduceTalk.on || !reply) break;
+    state("speaking");
+    await speak(reply);
+  }
+  reduceTalk.on = false;
+  state(null);
 }
 
 function renderProposal() {
@@ -962,16 +1033,23 @@ function bindReduce() {
       S.reduceProposal = await busy("Raggruppo i brani…", () => api("POST", `/api/setlists/${S.setlist.id}/group-proposal`,
         { max_patches: +$("#reduceMax").value || 4, notes: $("#reduceNotes").value.trim() }));
       renderProposal();
+      $("#reduceTalk").classList.remove("hidden");
+      S.reduceChat = [{ who: "ai", text: "Ecco la mia proposta. Dimmi cosa cambiare, oppure di' ok e le creo." }];
+      renderReduceChat();
     } catch {}
   });
-  $("#reduceCreate").addEventListener("click", async () => {
-    if (!S.reduceProposal) return;
-    $("#reduceDlg").close();
-    try {
-      await api("POST", `/api/setlists/${S.setlist.id}/generic-patches`, { proposal: S.reduceProposal });
-      await pollJob("generic", "Creo le patch generiche");
-    } catch (e) { toast(e.message, true); }
+  $("#reduceCreate").addEventListener("click", createGeneric);
+  $("#reduceSend").addEventListener("click", async () => {
+    const t = $("#reduceInput").value.trim();
+    if (!t) return;
+    $("#reduceInput").value = "";
+    const reply = await reduceTurn(t);
+    if (reply && $("#speakReplies").checked) speak(reply);
   });
+  $("#reduceInput").addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); $("#reduceSend").click(); } });
+  $("#reduceTalkBtn").addEventListener("click", reduceTalkLoop);
+  $("#reduceDlg").addEventListener("close", () => { reduceTalk.on = false; reduceTalk.ctl.stop?.(); window.speechSynthesis?.cancel(); });
+  attachMic($("#reduceInput"));
   $("#patchInfo").addEventListener("click", (e) => {
     const id = e.target.dataset.openPatch;
     if (!id) return;

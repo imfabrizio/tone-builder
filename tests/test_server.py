@@ -176,3 +176,23 @@ def test_generic_patches_dialog_and_youtube(recipe, monkeypatch, tmp_path):
     assert st["done"] == 3 and not st["errors"], st
     data = c.get(f"/api/setlists/{sid}").json()
     assert data["songs"][1]["audio"]["analysis"] == "suono crunch con chorus"
+
+
+def test_group_revise_dialog(monkeypatch):
+    class ReviseAI(StubAI):
+        def complete_json(self, system, user, *, audio_path=None):
+            return {"reply": "Spostata.", "go": True,
+                    "proposal": {"patches": [{"name": "Pulita", "songs": [{"index": 0}]},
+                                             {"name": "Distorta", "songs": [{"index": 1}]}]}}
+
+    monkeypatch.setattr(srv, "_provider", lambda name=None: ReviseAI({}))
+    c = TestClient(srv.app)
+    sl = c.post("/api/setlists/import", json={"text": "A - Uno\nB - Due", "name": "r"}).json()
+    prop = {"patches": [{"name": "Unica", "songs": [{"index": 0}, {"index": 1}]}]}
+    r = c.post(f"/api/setlists/{sl['id']}/group-revise",
+               json={"proposal": prop, "max_patches": 1, "history": [{"who": "me", "text": "dividile in due"}]}).json()
+    assert len(r["proposal"]["patches"]) == 2  # ha chiesto di cambiare il numero
+    assert r["go"] is False  # nessun ok esplicito
+    r = c.post(f"/api/setlists/{sl['id']}/group-revise",
+               json={"proposal": prop, "max_patches": 2, "history": [{"who": "me", "text": "ok creale"}]}).json()
+    assert r["go"] is True

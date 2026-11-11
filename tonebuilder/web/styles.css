@@ -344,3 +344,8 @@ code { background: var(--tolex); padding: 1px 5px; border-radius: 3px; font-size
 .group-card { border: 1px solid var(--line); border-radius: var(--radius-m); padding: 10px 12px; margin: 8px 0; background: var(--tolex); }
 .group-card h3 { margin: 0 0 4px; font-size: 15px; }
 .group-card ul { margin: 6px 0 0; padding-left: 18px; font-size: 13px; color: var(--ink-2); }
+
+.reduce-talk { display: grid; gap: 8px; border-top: 1px solid var(--line); padding-top: 10px; }
+#reduceChat { max-height: 220px; overflow-y: auto; }
+#reduceTalkBtn.listening { background: var(--bad); border-color: var(--bad); color: #fff; animation: pulse 1.2s ease-in-out infinite; }
+#reduceTalkBtn.speaking { background: var(--good); border-color: var(--good); color: #10151a; }

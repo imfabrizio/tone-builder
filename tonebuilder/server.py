@@ -520,6 +520,22 @@ def api_group_proposal(sid: str, body: GroupIn) -> dict:
         _err(e)
 
 
+class ReviseIn(BaseModel):
+    proposal: dict
+    history: list[dict]
+    max_patches: int = 4
+
+
+@app.post("/api/setlists/{sid}/group-revise")
+def api_group_revise(sid: str, body: ReviseIn) -> dict:
+    data = get_setlist(sid)
+    try:
+        return planner.revise_groups(data["songs"], body.proposal, body.history, max(1, min(8, body.max_patches)),
+                                     gearmod.describe_for_ai(gearmod.load_gear()), _provider())
+    except AIError as e:
+        _err(e)
+
+
 class GenericIn(BaseModel):
     proposal: dict
 
